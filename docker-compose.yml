@@ -1,14 +1,13 @@
-# AtlasVPN: API (FastAPI) + UI (nginx) en contenedores separados.
+# AtlasVPN: API + UI (nginx). Túnel típico:
+#   atlas-vpn.verkku.com       → localhost:8080 (UI)
+#   api-atlas-vpn.verkku.com   → localhost:8765 (API)
 #
-# En el navegador la UI debe conocer la URL pública del API. Pásala al *build* de la imagen UI, p. ej.:
-#   ATLASVPN_PUBLIC_API_URL=https://api-atlas.tu-dominio.com docker compose build atlasvpn-ui
-# O en un fichero .env:
-#   ATLASVPN_PUBLIC_API_URL=https://...
+# La UI debe saber la URL pública del API. Opción recomendada (sin rebuild): variable de entorno
+# en el contenedor UI al arrancar (escribe /atlasvpn-runtime-config.js):
+#   ATLASVPN_PUBLIC_API_URL=https://api-atlas-vpn.verkku.com
+# Opcional: también en build con el mismo nombre (VITE_API_BASE_URL vía build-arg).
 #
-# CORS del API: por defecto incluye https://atlas-vpn.verkku.com (y localhost:5173 para Vite).
-#   ATLASVPN_CORS_ORIGINS=https://atlas-vpn.verkku.com,https://otro-origen.com
-#
-# Puertos por defecto: API 8765, UI 8080 (mapea el túnel Cloudflare al que corresponda).
+# CORS del API: por defecto incluye https://atlas-vpn.verkku.com
 
 name: atlasvpn
 
@@ -59,6 +58,8 @@ services:
     depends_on:
       atlasvpn-api:
         condition: service_started
+    environment:
+      ATLASVPN_PUBLIC_API_URL: https://api-atlas-vpn.verkku.com
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 30s

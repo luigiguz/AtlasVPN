@@ -151,14 +151,6 @@ function AuthLoginPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
       >
         <h1 className="text-xl font-semibold">Iniciar sesión</h1>
         <p className="text-sm text-zinc-400">Acceso a la consola AtlasVPN.</p>
-        <p className="text-xs leading-relaxed text-zinc-500">
-          Primera instalación: el servidor crea un administrador por defecto (usuario habitual{" "}
-          <span className="font-mono text-zinc-400">admin</span>
-          ). En producción define{" "}
-          <span className="font-mono text-zinc-400">ATLASVPN_DEFAULT_ADMIN_PASSWORD</span> antes del
-          primer arranque; si no, aplica la contraseña inicial indicada en los comentarios de{" "}
-          <span className="font-mono text-zinc-400">docker-compose.yml</span>.
-        </p>
         {err ? <p className="text-sm text-rose-300">{err}</p> : null}
         <input
           className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"

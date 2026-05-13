@@ -1,5 +1,14 @@
-const API_BASE_RAW = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "";
-export const API_BASE = API_BASE_RAW.replace(/\/$/, "");
+function resolveApiBase(): string {
+  if (typeof window !== "undefined") {
+    const w = (window as unknown as { __ATLASVPN_API_BASE__?: string }).__ATLASVPN_API_BASE__;
+    if (typeof w === "string" && w.trim()) return w.replace(/\/$/, "");
+  }
+  const v = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "";
+  return v.replace(/\/$/, "");
+}
+
+/** Base pública del API (p. ej. https://api-atlas-vpn.verkku.com). Vacío = mismo origen. */
+export const API_BASE = resolveApiBase();
 
 const TOKEN_KEY = "atlasvpn_access_token";
 
