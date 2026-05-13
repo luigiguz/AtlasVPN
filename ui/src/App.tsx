@@ -13,6 +13,7 @@ import {
   Store,
   Terminal,
   Trash2,
+  Users,
   Wifi,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
@@ -32,7 +33,6 @@ type SitesResponse = { configPath: string; domainSuffix?: string; sites: SiteRow
 type AuthUser = { username: string; role: "admin" | "operator" | "viewer" };
 
 type AuthStatusResponse = {
-  needsBootstrap: boolean;
   authenticated: boolean;
   user?: { username: string; role: string };
 };
@@ -139,88 +139,6 @@ function StatusPill({ kind }: { kind: string }) {
   );
 }
 
-function AuthBootstrapPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
-  const [user, setUser] = useState("");
-  const [pw, setPw] = useState("");
-  const [pw2, setPw2] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setErr("");
-    if (pw !== pw2) {
-      setErr("Las contraseñas no coinciden.");
-      return;
-    }
-    if (pw.length < 12) {
-      setErr("Mínimo 12 caracteres.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const r = await api<{ ok: boolean; user: { username: string; role: string } }>(
-        "/api/auth/bootstrap",
-        {
-          method: "POST",
-          body: JSON.stringify({ username: user.trim(), password: pw }),
-        }
-      );
-      onDone({ username: r.user.username, role: r.user.role as AuthUser["role"] });
-    } catch (ex) {
-      setErr(String(ex));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-cf-ink px-4 text-zinc-100 vpn-grid-bg">
-      <form
-        onSubmit={(e) => void submit(e)}
-        className="w-full max-w-sm space-y-4 rounded-2xl border border-cf-line bg-cf-card/90 p-8 ring-1 ring-white/5"
-      >
-        <h1 className="text-xl font-semibold">Configurar AtlasVPN</h1>
-        <p className="text-sm text-zinc-400">
-          Crea el usuario administrador (contraseña de al menos 12 caracteres).
-        </p>
-        {err ? <p className="text-sm text-rose-300">{err}</p> : null}
-        <input
-          className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
-          placeholder="Usuario"
-          value={user}
-          onChange={(e) => setUser(e.target.value)}
-          autoComplete="username"
-          required
-        />
-        <input
-          className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
-          placeholder="Contraseña"
-          type="password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          autoComplete="new-password"
-          required
-        />
-        <input
-          className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
-          placeholder="Repetir contraseña"
-          type="password"
-          value={pw2}
-          onChange={(e) => setPw2(e.target.value)}
-          autoComplete="new-password"
-          required
-        />
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded-xl bg-cf-orange py-2.5 text-sm font-semibold text-black disabled:opacity-50"
-        >
-          {busy ? "Creando…" : "Crear administrador"}
-        </button>
-      </form>
-    </div>
-  );
-}
-
 function AuthLoginPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
   const [user, setUser] = useState("");
   const [pw, setPw] = useState("");
@@ -253,6 +171,14 @@ function AuthLoginPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
       >
         <h1 className="text-xl font-semibold">Iniciar sesión</h1>
         <p className="text-sm text-zinc-400">Acceso a la consola AtlasVPN.</p>
+        <p className="text-xs leading-relaxed text-zinc-500">
+          Primera instalación: el servidor crea un administrador por defecto (usuario habitual{" "}
+          <span className="font-mono text-zinc-400">admin</span>
+          ). En producción define{" "}
+          <span className="font-mono text-zinc-400">ATLASVPN_DEFAULT_ADMIN_PASSWORD</span> antes del
+          primer arranque; si no, aplica la contraseña inicial indicada en los comentarios de{" "}
+          <span className="font-mono text-zinc-400">docker-compose.yml</span>.
+        </p>
         {err ? <p className="text-sm text-rose-300">{err}</p> : null}
         <input
           className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
@@ -283,85 +209,280 @@ function AuthLoginPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
   );
 }
 
-function AdminUserInvite() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"operator" | "viewer" | "admin">("operator");
-  const [err, setErr] = useState("");
-  const [ok, setOk] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async (e: FormEvent) => {
+type ListedUser = { id: number; username: string; role: string; created_at: number };
+
+function UsersAdminPage({ me }: { me: AuthUser }) {
+  const [rows, setRows] = useState<ListedUser[]>([]);
+  const [loadErr, setLoadErr] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editRole, setEditRole] = useState<"admin" | "operator" | "viewer">("operator");
+  const [editPw, setEditPw] = useState("");
+  const [editErr, setEditErr] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [cuName, setCuName] = useState("");
+  const [cuPw, setCuPw] = useState("");
+  const [cuRole, setCuRole] = useState<"admin" | "operator" | "viewer">("operator");
+  const [cuErr, setCuErr] = useState("");
+  const [cuOk, setCuOk] = useState("");
+  const [cuBusy, setCuBusy] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoadErr("");
+    try {
+      const d = await api<{ users: ListedUser[] }>("/api/auth/users");
+      setRows(d.users);
+    } catch (e) {
+      setLoadErr(String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const startEdit = (u: ListedUser) => {
+    setEditing(u.username);
+    setEditRole(u.role as typeof editRole);
+    setEditPw("");
+    setEditErr("");
+  };
+
+  const submitEdit = async (e: FormEvent) => {
     e.preventDefault();
-    setErr("");
-    setOk("");
-    if (password.length < 12) {
-      setErr("La contraseña debe tener al menos 12 caracteres.");
+    if (!editing) return;
+    if (editPw.trim() && editPw.trim().length < 12) {
+      setEditErr("La contraseña debe tener al menos 12 caracteres.");
       return;
     }
-    setBusy(true);
+    setEditErr("");
+    setEditBusy(true);
+    try {
+      const body: { role: typeof editRole; password?: string } = { role: editRole };
+      const p = editPw.trim();
+      if (p) body.password = p;
+      await api(`/api/auth/users/${encodeURIComponent(editing)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      setEditing(null);
+      await reload();
+    } catch (ex) {
+      setEditErr(String(ex));
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const submitCreate = async (e: FormEvent) => {
+    e.preventDefault();
+    setCuErr("");
+    setCuOk("");
+    if (cuPw.length < 12) {
+      setCuErr("La contraseña debe tener al menos 12 caracteres.");
+      return;
+    }
+    setCuBusy(true);
     try {
       await api("/api/auth/users", {
         method: "POST",
-        body: JSON.stringify({ username: username.trim(), password, role }),
+        body: JSON.stringify({ username: cuName.trim(), password: cuPw, role: cuRole }),
       });
-      setOk(`Usuario «${username.trim()}» creado.`);
-      setUsername("");
-      setPassword("");
-      setRole("operator");
+      setCuOk(`Usuario «${cuName.trim()}» creado.`);
+      setCuName("");
+      setCuPw("");
+      setCuRole("operator");
+      await reload();
     } catch (ex) {
-      setErr(String(ex));
+      setCuErr(String(ex));
     } finally {
-      setBusy(false);
+      setCuBusy(false);
     }
   };
+
+  const doDelete = async (username: string) => {
+    if (!window.confirm(`¿Eliminar al usuario «${username}»? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    try {
+      await api(`/api/auth/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+      if (editing === username) setEditing(null);
+      await reload();
+    } catch (ex) {
+      window.alert(String(ex));
+    }
+  };
+
+  const fmtDate = (ts: number) =>
+    new Date(ts * 1000).toLocaleString("es", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
   return (
-    <form
-      onSubmit={(e) => void submit(e)}
-      className="mt-4 space-y-3 rounded-xl border border-cf-line/80 bg-black/20 p-4"
+    <motion.div
+      key="users"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mx-auto w-full max-w-3xl space-y-6"
     >
-      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Nuevo usuario</p>
-      {err ? <p className="text-xs text-rose-300">{err}</p> : null}
-      {ok ? <p className="text-xs text-emerald-400">{ok}</p> : null}
-      <input
-        className="w-full rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
-        placeholder="Nombre de usuario"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        autoComplete="off"
-      />
-      <input
-        className="w-full rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
-        placeholder="Contraseña (≥12)"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        autoComplete="new-password"
-      />
-      <select
-        className="w-full rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
-        value={role}
-        onChange={(e) => setRole(e.target.value as typeof role)}
+      <div>
+        <h2 className="text-lg font-semibold text-zinc-100">Usuarios y roles</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Administradores gestionan cuentas: operador (túneles, sin credenciales Cloudflare), visor
+          (solo estado) o administrador.
+        </p>
+      </div>
+
+      <form
+        onSubmit={(e) => void submitCreate(e)}
+        className="space-y-3 rounded-2xl border border-cf-line bg-cf-card/90 p-5 ring-1 ring-white/[0.03]"
       >
-        <option value="operator">Operador (túneles, sin credenciales Cloudflare)</option>
-        <option value="viewer">Solo lectura</option>
-        <option value="admin">Administrador</option>
-      </select>
-      <button
-        type="submit"
-        disabled={busy}
-        className="rounded-lg bg-cf-orange px-4 py-2 text-xs font-semibold text-black disabled:opacity-50"
-      >
-        {busy ? "Creando…" : "Crear usuario"}
-      </button>
-    </form>
+        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Nuevo usuario</p>
+        {cuErr ? <p className="text-xs text-rose-300">{cuErr}</p> : null}
+        {cuOk ? <p className="text-xs text-emerald-400">{cuOk}</p> : null}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <input
+            className="rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
+            placeholder="Nombre de usuario"
+            value={cuName}
+            onChange={(e) => setCuName(e.target.value)}
+            autoComplete="off"
+            required
+          />
+          <input
+            className="rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
+            placeholder="Contraseña (≥12)"
+            type="password"
+            value={cuPw}
+            onChange={(e) => setCuPw(e.target.value)}
+            autoComplete="new-password"
+            required
+          />
+        </div>
+        <select
+          className="w-full rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm sm:max-w-md"
+          value={cuRole}
+          onChange={(e) => setCuRole(e.target.value as typeof cuRole)}
+        >
+          <option value="operator">Operador (túneles, sin credenciales Cloudflare)</option>
+          <option value="viewer">Solo lectura</option>
+          <option value="admin">Administrador</option>
+        </select>
+        <button
+          type="submit"
+          disabled={cuBusy}
+          className="rounded-lg bg-cf-orange px-4 py-2 text-xs font-semibold text-black disabled:opacity-50"
+        >
+          {cuBusy ? "Creando…" : "Crear usuario"}
+        </button>
+      </form>
+
+      {loadErr ? <p className="text-sm text-rose-300">{loadErr}</p> : null}
+
+      <div className="overflow-hidden rounded-2xl border border-cf-line bg-cf-card/90 ring-1 ring-white/[0.03]">
+        <div className="border-b border-cf-line/80 bg-black/20 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Cuentas</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[28rem] text-left text-sm">
+            <thead>
+              <tr className="border-b border-cf-line/60 text-xs uppercase tracking-wide text-zinc-500">
+                <th className="px-4 py-3 font-medium">Usuario</th>
+                <th className="px-4 py-3 font-medium">Rol</th>
+                <th className="px-4 py-3 font-medium">Alta</th>
+                <th className="px-4 py-3 font-medium text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((u) => (
+                <tr key={u.id} className="border-b border-cf-line/40 last:border-0">
+                  <td className="px-4 py-3 font-mono text-zinc-200">{u.username}</td>
+                  <td className="px-4 py-3 text-zinc-300">{u.role}</td>
+                  <td className="px-4 py-3 text-xs text-zinc-500">{fmtDate(u.created_at)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => startEdit(u)}
+                        className="rounded-lg bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-200 ring-1 ring-zinc-600 hover:bg-zinc-700"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={u.username === me.username}
+                        onClick={() => void doDelete(u.username)}
+                        className="rounded-lg bg-rose-950/80 px-2.5 py-1.5 text-xs font-medium text-rose-100 ring-1 ring-rose-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {editing ? (
+        <form
+          onSubmit={(e) => void submitEdit(e)}
+          className="space-y-3 rounded-2xl border border-cf-orange/30 bg-cf-orange/5 p-5 ring-1 ring-cf-orange/20"
+        >
+          <p className="text-sm font-medium text-zinc-100">
+            Editar <span className="font-mono text-cf-orange">{editing}</span>
+          </p>
+          {editErr ? <p className="text-xs text-rose-300">{editErr}</p> : null}
+          <label className="block text-xs text-zinc-500">Rol</label>
+          <select
+            className="w-full max-w-md rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
+            value={editRole}
+            onChange={(e) => setEditRole(e.target.value as typeof editRole)}
+          >
+            <option value="operator">Operador</option>
+            <option value="viewer">Solo lectura</option>
+            <option value="admin">Administrador</option>
+          </select>
+          <label className="block text-xs text-zinc-500">Nueva contraseña (opcional, ≥12)</label>
+          <input
+            className="w-full max-w-md rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
+            type="password"
+            placeholder="Dejar vacío para no cambiar"
+            value={editPw}
+            onChange={(e) => setEditPw(e.target.value)}
+            autoComplete="new-password"
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={editBusy}
+              className="rounded-lg bg-cf-orange px-4 py-2 text-xs font-semibold text-black disabled:opacity-50"
+            >
+              {editBusy ? "Guardando…" : "Guardar cambios"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(null)}
+              className="rounded-lg bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-200 ring-1 ring-zinc-600"
+            >
+              Cancelar
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </motion.div>
   );
 }
 
 export default function App() {
-  const [authPhase, setAuthPhase] = useState<"loading" | "bootstrap" | "login" | "app">("loading");
+  const [authPhase, setAuthPhase] = useState<"loading" | "login" | "app">("loading");
   const [me, setMe] = useState<AuthUser | null>(null);
 
-  const [tab, setTab] = useState<"conn" | "cf" | "poslite" | "about">("conn");
+  const [tab, setTab] = useState<"conn" | "cf" | "users" | "poslite" | "about">("conn");
   const [sites, setSites] = useState<SiteRow[]>([]);
   const [configPath, setConfigPath] = useState("");
   /** Sitio con panel de acciones desplegado (acordeón). */
@@ -391,10 +512,6 @@ export default function App() {
       try {
         const r = await fetch("/api/auth/status", { credentials: "include" });
         const s = (await r.json()) as AuthStatusResponse;
-        if (s.needsBootstrap) {
-          setAuthPhase("bootstrap");
-          return;
-        }
         if (s.authenticated && s.user) {
           setMe({
             username: s.user.username,
@@ -519,7 +636,7 @@ export default function App() {
   }, [authPhase, me, acc, tok, suf, zone, appendLog, loadSites]);
 
   useEffect(() => {
-    if (me && me.role !== "admin" && tab === "cf") setTab("conn");
+    if (me && me.role !== "admin" && (tab === "cf" || tab === "users")) setTab("conn");
   }, [me, tab]);
 
   const doStart = async (site: string, services: "ssh" | "db" | "both") => {
@@ -703,9 +820,6 @@ export default function App() {
       </div>
     );
   }
-  if (authPhase === "bootstrap") {
-    return <AuthBootstrapPanel onDone={(u) => { setMe(u); setAuthPhase("app"); }} />;
-  }
   if (authPhase === "login") {
     return <AuthLoginPanel onDone={(u) => { setMe(u); setAuthPhase("app"); }} />;
   }
@@ -720,7 +834,7 @@ export default function App() {
   const canOperate = me.role !== "viewer";
   const canAdmin = me.role === "admin";
 
-  type TabId = "conn" | "cf" | "poslite" | "about";
+  type TabId = "conn" | "cf" | "users" | "poslite" | "about";
   const TabBtn = ({
     id,
     label,
@@ -773,6 +887,7 @@ export default function App() {
             <TabBtn id="conn" label="Conexiones" Icon={Wifi} />
             <TabBtn id="poslite" label="Poslite" Icon={Store} />
             {canAdmin ? <TabBtn id="cf" label="Cloudflare" Icon={Cloud} /> : null}
+            {canAdmin ? <TabBtn id="users" label="Usuarios" Icon={Users} /> : null}
             <TabBtn id="about" label="Acerca de" Icon={Shield} />
             <div className="mx-1 hidden h-8 w-px bg-white/10 sm:block" aria-hidden />
             <div className="flex items-center gap-2 rounded-xl px-2 py-1 text-xs text-zinc-400">
@@ -1199,6 +1314,8 @@ export default function App() {
           </motion.div>
         )}
 
+        {canAdmin && tab === "users" && <UsersAdminPage me={me} />}
+
         {tab === "poslite" && (
           <motion.div
             key="poslite"
@@ -1281,21 +1398,6 @@ export default function App() {
                 <p className="mt-2 text-sm leading-relaxed text-zinc-400">{c.b}</p>
               </motion.div>
             ))}
-            {canAdmin ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-                className="rounded-2xl border border-cf-line bg-cf-card/80 p-6 ring-1 ring-white/[0.03]"
-              >
-                <h3 className="font-semibold text-cf-orange">Usuarios y roles</h3>
-                <p className="mt-2 text-sm text-zinc-400">
-                  Los administradores pueden crear cuentas con rol operador (gestión de túneles) o
-                  visor (solo estado). Contraseñas mínimo 12 caracteres.
-                </p>
-                <AdminUserInvite />
-              </motion.div>
-            ) : null}
           </motion.div>
         )}
       </main>

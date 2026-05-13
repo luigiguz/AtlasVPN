@@ -13,6 +13,10 @@
 #   ATLASVPN_SESSION_SECRET=<hex largo; obligatorio en producción, p. ej. openssl rand -hex 32>
 #   ATLASVPN_SECURE_COOKIES=1  (cookies solo HTTPS; detrás de proxy TLS)
 #   ATLASVPN_SESSION_MAX_AGE=604800
+#   ATLASVPN_DEFAULT_ADMIN_USERNAME=admin
+#   ATLASVPN_DEFAULT_ADMIN_PASSWORD=<≥12 caracteres; recomendado en producción>
+#   Si la BD de usuarios está vacía y no defines la contraseña, se usa la inicial
+#   AtlasVPN_Admin_Initial12 (cámbiala en cuanto entres).
 
 name: atlasvpn
 
@@ -33,6 +37,8 @@ services:
       ATLASVPN_SESSION_SECRET: ${ATLASVPN_SESSION_SECRET:-}
       ATLASVPN_SECURE_COOKIES: ${ATLASVPN_SECURE_COOKIES:-0}
       ATLASVPN_SESSION_MAX_AGE: ${ATLASVPN_SESSION_MAX_AGE:-604800}
+      ATLASVPN_DEFAULT_ADMIN_USERNAME: ${ATLASVPN_DEFAULT_ADMIN_USERNAME:-admin}
+      ATLASVPN_DEFAULT_ADMIN_PASSWORD: ${ATLASVPN_DEFAULT_ADMIN_PASSWORD:-}
     volumes:
       - atlasvpn_settings:/app/.atlasvpn
       - atlasvpn_cloudflared:/app/.cloudflared-tunnels

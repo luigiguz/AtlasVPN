@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 from pathlib import Path
@@ -19,6 +21,9 @@ _ph = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
 
 USER_RE = re.compile(r"^[a-zA-Z0-9_]{3,32}$")
 ROLES = frozenset({"admin", "operator", "viewer"})
+
+# Solo si la BD está vacía y no hay ATLASVPN_DEFAULT_ADMIN_PASSWORD (ver ensure_default_admin).
+_DEFAULT_INITIAL_PASSWORD = "AtlasVPN_Admin_Initial12"
 
 
 def users_db_path() -> Path:
@@ -118,3 +123,108 @@ def verify_login(username: str, password: str) -> dict[str, Any] | None:
         time.sleep(0.55)
         return None
     return {"id": int(row["id"]), "username": row["username"], "role": row["role"]}
+
+
+def list_users() -> list[dict[str, Any]]:
+    init_db()
+    with _db_lock, _conn() as c:
+        rows = c.execute(
+            "SELECT id, username, role, created_at FROM users ORDER BY username COLLATE NOCASE"
+        ).fetchall()
+    return [
+        {
+            "id": int(r["id"]),
+            "username": r["username"],
+            "role": r["role"],
+            "created_at": int(r["created_at"]),
+        }
+        for r in rows
+    ]
+
+
+def update_user(
+    target_username: str,
+    *,
+    actor_username: str,
+    role: str | None = None,
+    password: str | None = None,
+) -> None:
+    if role is None and (password is None or password == ""):
+        raise ValueError("Nada que actualizar.")
+    target_key = target_username.strip().lower()
+    act_key = actor_username.strip().lower()
+    if role is not None and role not in ROLES:
+        raise ValueError("Rol inválido.")
+    with _db_lock, _conn() as c:
+        row = c.execute(
+            "SELECT id, username, role FROM users WHERE username = ?",
+            (target_key,),
+        ).fetchone()
+        if not row:
+            raise ValueError("Usuario no encontrado.")
+        cur_role = str(row["role"])
+        new_role = role if role is not None else cur_role
+        if cur_role == "admin" and new_role != "admin":
+            other = c.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND username != ?",
+                (target_key,),
+            ).fetchone()
+            if not other or int(other["n"]) < 1:
+                raise ValueError("No se puede quitar el último administrador.")
+        parts: list[str] = []
+        params: list[Any] = []
+        if role is not None:
+            parts.append("role = ?")
+            params.append(new_role)
+        if password is not None and password != "":
+            if len(password) < 12:
+                raise ValueError("La contraseña debe tener al menos 12 caracteres.")
+            parts.append("password_hash = ?")
+            params.append(_ph.hash(password))
+        if not parts:
+            raise ValueError("Nada que actualizar.")
+        params.append(int(row["id"]))
+        c.execute(f"UPDATE users SET {', '.join(parts)} WHERE id = ?", params)
+    audit("user_updated", act_key, f"{target_key}")
+
+
+def delete_user(target_username: str, *, actor_username: str) -> None:
+    target_key = target_username.strip().lower()
+    act_key = actor_username.strip().lower()
+    if target_key == act_key:
+        raise ValueError("No puedes eliminar tu propia cuenta.")
+    with _db_lock, _conn() as c:
+        row = c.execute(
+            "SELECT id, role FROM users WHERE username = ?",
+            (target_key,),
+        ).fetchone()
+        if not row:
+            raise ValueError("Usuario no encontrado.")
+        if str(row["role"]) == "admin":
+            other = c.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND username != ?",
+                (target_key,),
+            ).fetchone()
+            if not other or int(other["n"]) < 1:
+                raise ValueError("No se puede eliminar el último administrador.")
+        c.execute("DELETE FROM users WHERE id = ?", (int(row["id"]),))
+    audit("user_deleted", act_key, target_key)
+
+
+def ensure_default_admin() -> None:
+    """Si no hay usuarios, crea un administrador inicial (sin endpoint público de bootstrap)."""
+    init_db()
+    if count_users() > 0:
+        return
+    raw = (os.environ.get("ATLASVPN_DEFAULT_ADMIN_USERNAME") or "admin").strip()
+    username = raw if USER_RE.match(raw) else "admin"
+    pwd = (os.environ.get("ATLASVPN_DEFAULT_ADMIN_PASSWORD") or "").strip()
+    if not pwd:
+        pwd = _DEFAULT_INITIAL_PASSWORD
+        print(
+            "ATLASVPN: base de usuarios vacía; se creó el administrador inicial. "
+            f"Usuario: {username!r}. Define ATLASVPN_DEFAULT_ADMIN_PASSWORD antes del primer "
+            "arranque en producción; si no, usa la contraseña inicial documentada (README / compose).",
+            file=sys.stderr,
+        )
+    create_user(username, pwd, "admin")

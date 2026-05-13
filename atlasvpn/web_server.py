@@ -34,7 +34,16 @@ from atlasvpn.web_auth import (
     require_roles,
     session_middleware_config,
 )
-from atlasvpn.web_users import audit, count_users, create_user, init_db, verify_login
+from atlasvpn.web_users import (
+    audit,
+    create_user,
+    delete_user,
+    ensure_default_admin,
+    init_db,
+    list_users,
+    update_user,
+    verify_login,
+)
 
 _SCRIPTS = PROJECT_ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -99,15 +108,15 @@ class LoginBody(BaseModel):
     password: str = Field(..., min_length=1, max_length=256)
 
 
-class BootstrapBody(BaseModel):
-    username: str = Field(..., min_length=1, max_length=64)
-    password: str = Field(..., min_length=12, max_length=256)
-
-
 class CreateUserBody(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=12, max_length=256)
     role: Literal["admin", "operator", "viewer"] = "operator"
+
+
+class UpdateUserBody(BaseModel):
+    role: Literal["admin", "operator", "viewer"] | None = None
+    password: str | None = Field(None, max_length=256)
 
 
 def _proc_for_site_label(state: dict, site: str, label: str) -> dict | None:
@@ -172,6 +181,7 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         init_db()
+        ensure_default_admin()
         yield
 
     app = FastAPI(title="AtlasVPN", version="1.0", lifespan=lifespan)
@@ -190,40 +200,17 @@ def create_app() -> FastAPI:
 
     @app.get("/api/auth/status")
     def auth_status(request: Request) -> dict[str, Any]:
-        n = count_users()
         u = request.session.get("user")
         if isinstance(u, dict) and u.get("username") and u.get("role"):
             return {
-                "needsBootstrap": False,
                 "authenticated": True,
                 "user": {"username": str(u["username"]), "role": str(u["role"])},
             }
-        return {"needsBootstrap": n == 0, "authenticated": False}
-
-    @app.post("/api/auth/bootstrap")
-    def auth_bootstrap(request: Request, body: BootstrapBody) -> dict[str, Any]:
-        if count_users() > 0:
-            raise HTTPException(400, "Ya existe un usuario. Usa inicio de sesión.")
-        try:
-            create_user(body.username.strip(), body.password, "admin")
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
-        row = verify_login(body.username.strip(), body.password)
-        if not row:
-            raise HTTPException(500, "Error interno tras crear usuario.")
-        request.session["user"] = {
-            "username": row["username"],
-            "role": row["role"],
-            "id": row["id"],
-        }
-        audit("bootstrap", row["username"], "")
-        return {"ok": True, "user": {"username": row["username"], "role": row["role"]}}
+        return {"authenticated": False}
 
     @app.post("/api/auth/login")
     def auth_login(request: Request, body: LoginBody) -> dict[str, Any]:
         assert_login_allowed(request)
-        if count_users() == 0:
-            raise HTTPException(400, "Primero crea el usuario administrador (asistente inicial).")
         row = verify_login(body.username.strip(), body.password)
         if not row:
             register_failed_login(request)
@@ -244,6 +231,10 @@ def create_app() -> FastAPI:
             audit("logout", str(u.get("username")), "")
         return {"ok": True}
 
+    @app.get("/api/auth/users")
+    def auth_list_users(_admin: dict[str, Any] = Depends(require_roles("admin"))) -> dict[str, Any]:
+        return {"users": list_users()}
+
     @app.post("/api/auth/users")
     def auth_create_user(
         body: CreateUserBody,
@@ -254,6 +245,35 @@ def create_app() -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         audit("user_created_by_admin", str(_admin.get("username")), body.username.strip().lower())
+        return {"ok": True}
+
+    @app.patch("/api/auth/users/{username}")
+    def auth_update_user(
+        username: str,
+        body: UpdateUserBody,
+        admin: dict[str, Any] = Depends(require_roles("admin")),
+    ) -> dict[str, bool]:
+        pw = (body.password or "").strip() or None
+        try:
+            update_user(
+                username,
+                actor_username=str(admin.get("username") or ""),
+                role=body.role,
+                password=pw,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True}
+
+    @app.delete("/api/auth/users/{username}")
+    def auth_delete_user(
+        username: str,
+        admin: dict[str, Any] = Depends(require_roles("admin")),
+    ) -> dict[str, bool]:
+        try:
+            delete_user(username, actor_username=str(admin.get("username") or ""))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
         return {"ok": True}
 
     @app.get("/api/settings")

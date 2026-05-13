@@ -23,7 +23,7 @@ disable-model-invocation: true
 
 1. Instalar deps: `pip install -r requirements.txt`.
 2. Ejecutar `python -m atlasvpn` o `scripts/launch_atlas_vpn.bat`.
-3. **Login (UI web)**: si no hay usuarios, pantalla **bootstrap** crea el primer administrador (Argon2id en `.atlasvpn/users.db`); sesión firmada (`ATLASVPN_SESSION_SECRET` o `.atlasvpn/session.secret`). Roles: `admin`, `operator`, `viewer` (API y UI acotadas).
+3. **Login (UI web)**: el servidor crea un administrador inicial si la base `.atlasvpn/users.db` está vacía (usuario `ATLASVPN_DEFAULT_ADMIN_USERNAME` o `admin`, contraseña `ATLASVPN_DEFAULT_ADMIN_PASSWORD` o valor inicial documentado en compose). Sesión firmada (`ATLASVPN_SESSION_SECRET` o `.atlasvpn/session.secret`). Roles: `admin`, `operator`, `viewer`. Los administradores gestionan el resto de cuentas en la pestaña **Usuarios**.
 4. **Login (`--tk`)**: primera vez contraseña local (PBKDF2 en `.atlasvpn/auth.json`); es independiente del login web hasta que se unifique.
 5. Pestaña **Cloudflare**: Account ID, API Token (lectura Access/Zero Trust), sufijo de dominio → **Sincronizar** escribe `scripts/tunnels.json` agrupando dominios `*-ssh.<sufijo>` y `*-bd.<sufijo>`.
 6. Pestaña **Conexiones**: iniciar/detener túneles; mismo backend que `scripts/tunnel_manager.py`.
