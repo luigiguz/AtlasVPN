@@ -1,10 +1,10 @@
 # Compila la imagen en el runner self-hosted (Linux ARM64) y despliega con Docker Compose
-# en la misma máquina (p. ej. Raspberry Pi con etiqueta VerkkuRunner).
+# en la misma máquina (p. ej. Raspberry Pi).
 #
-# Etiquetas en el runner (ejemplo al registrar o con ./run.sh config):
-#   ./config.sh --labels VerkkuRunner
-# El runner debe tener: self-hosted, Linux, ARM64, VerkkuRunner
-# Si "VerkkuRunner" no está como etiqueta, quita esa línea de runs-on o añade la etiqueta al runner.
+# runs-on solo usa ETIQUETAS (labels), no el nombre visible del runner en la UI.
+# Por defecto GitHub añade self-hosted + OS + arquitectura (p. ej. Linux + ARM64).
+# Si tienes varios runners y quieres uno concreto, añade una etiqueta custom al runner
+# (./config.sh --labels mi-etiqueta) y lista esa etiqueta aquí debajo.
 
 name: AtlasVPN — build y deploy (self-hosted)
 
@@ -42,7 +42,6 @@ jobs:
       - self-hosted
       - Linux
       - ARM64
-      - VerkkuRunner
 
     env:
       COMPOSE_PROJECT_NAME: atlasvpn
