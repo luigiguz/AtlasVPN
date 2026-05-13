@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="280"
+     height="24"
+     viewBox="0 0 280 24"
+     role="img"
+     aria-label="ATLAS VPN">
+  <title>ATLAS VPN</title>
+
+  <!-- Globo (marca compacta) -->
+  <circle cx="12" cy="12" r="10.5" fill="#0B2A4A"/>
+  <circle cx="12" cy="12" r="10.5" fill="none" stroke="#FFFFFF" stroke-width="1.35"/>
+  <path d="M12 1.5 A10.5 10.5 0 0 1 22.5 12 L12 12 Z" fill="#F97316"/>
+  <ellipse cx="12" cy="12" rx="10.5" ry="4.2" fill="none" stroke="#FFFFFF" stroke-width="1"/>
+  <ellipse cx="12" cy="12" rx="5.2" ry="10.5" fill="none" stroke="#FFFFFF" stroke-width="1"/>
+
+  <!-- Fondos inclinados (estilo ATLAS / naranja + marino) -->
+  <g transform="translate(28, 1) skewX(-6)">
+    <rect x="0" y="0" width="78" height="20" rx="1.5" fill="#F97316"/>
+    <rect x="76" y="0" width="168" height="20" rx="1.5" fill="#0B2A4A"/>
+  </g>
+
+  <!-- Texto: atlas (sobre naranja) + vpn (sobre marino) -->
+  <g transform="translate(30, 0)">
+    <text x="0" y="17.5"
+          font-family="Segoe UI, Inter, Arial, sans-serif"
+          font-size="15.5"
+          font-weight="800"
+          letter-spacing="-0.35"
+          paint-order="stroke fill"
+          stroke="#051018"
+          stroke-width="0.55">
+      <tspan fill="#F8FAFC">atlas</tspan>
+      <tspan dx="10" fill="#F8FAFC"> vpn</tspan>
+    </text>
+  </g>
+
+  <!-- Línea inferior (acento) -->
+  <path d="M 26 21.5 Q 140 24.5 254 21.5"
+        fill="none"
+        stroke="#F97316"
+        stroke-width="1.35"
+        stroke-linecap="round"/>
+</svg>

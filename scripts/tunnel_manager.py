@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""
+Gestor de túneles locales cloudflared access tcp (SSH / BD).
+Requisito: cloudflared instalado y en PATH; acceso Cloudflare Access configurado.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+if sys.platform != "win32":
+    import signal
+
+STATE_DIR = Path(__file__).resolve().parent.parent / ".cloudflared-tunnels"
+STATE_FILE = STATE_DIR / "state.json"
+
+
+def default_config_path() -> Path:
+    p = Path(__file__).resolve().parent / "tunnels.json"
+    env = os.environ.get("TUNNELS_CONFIG")
+    return Path(env) if env else p
+
+
+def load_config_optional(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_config(path: Path) -> dict:
+    data = load_config_optional(path)
+    if data is None:
+        sys.stderr.write(
+            f"No existe {path}. Copia scripts/tunnels.example.json a scripts/tunnels.json.\n"
+        )
+        sys.exit(2)
+    return data
+
+
+def cloudflared_bin() -> str:
+    return os.environ.get("CLOUDFLARED", "cloudflared")
+
+
+def start_tunnel(hostname: str, local_port: int) -> subprocess.Popen:
+    url = f"localhost:{local_port}"
+    cmd = [
+        cloudflared_bin(),
+        "access",
+        "tcp",
+        "--hostname",
+        hostname,
+        "--url",
+        url,
+    ]
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+    return subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        creationflags=creationflags,
+    )
+
+
+def read_state() -> dict:
+    if not STATE_FILE.is_file():
+        return {"processes": []}
+    with STATE_FILE.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_state(data: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with STATE_FILE.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def kill_pid(pid: int) -> None:
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F", "/T"],
+            capture_output=True,
+            text=True,
+        )
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+
+def init_config_from_example() -> tuple[bool, str]:
+    src = Path(__file__).resolve().parent / "tunnels.example.json"
+    dst = Path(__file__).resolve().parent / "tunnels.json"
+    if dst.exists():
+        return False, f"Ya existe {dst}"
+    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    return True, f"Creado {dst}. Edita hostnames y puertos."
+
+
+def cmd_init_example() -> None:
+    _ok, msg = init_config_from_example()
+    print(msg)
+
+
+def start_site_services(site: str, services: str, config_path: Path) -> tuple[bool, list[str]]:
+    """
+    Levanta túneles para un sitio. Devuelve (éxito_total, líneas de texto para log/consola).
+    """
+    lines: list[str] = []
+    cfg = load_config_optional(config_path)
+    if cfg is None:
+        return False, [f"No existe la configuración: {config_path}"]
+    sites: dict = cfg.get("sites") or {}
+    if site not in sites:
+        return False, [f'Sitio "{site}" no está en la configuración.']
+    entry = sites[site]
+    ssh = entry.get("ssh")
+    db = entry.get("db")
+    want_ssh = services in ("ssh", "both")
+    want_db = services in ("db", "both")
+    if want_ssh and not ssh:
+        return False, ["Este sitio no define ssh."]
+    if want_db and not db:
+        return False, ["Este sitio no define db."]
+
+    state = read_state()
+    procs: list[dict] = list(state.get("processes", []))
+    new_procs: list[dict] = []
+    ok = True
+
+    def launch(label: str, spec: dict) -> None:
+        nonlocal ok
+        hostname = spec["hostname"]
+        port = int(spec["local_port"])
+        p = start_tunnel(hostname, port)
+        time.sleep(0.6)
+        if p.poll() is not None:
+            manual = " ".join(
+                [
+                    cloudflared_bin(),
+                    "access",
+                    "tcp",
+                    "--hostname",
+                    hostname,
+                    "--url",
+                    f"localhost:{port}",
+                ]
+            )
+            lines.append(
+                f"ERROR {label}: no se mantuvo vivo ({hostname} -> {port}). Prueba en terminal: {manual}"
+            )
+            ok = False
+            return
+        new_procs.append(
+            {
+                "pid": p.pid,
+                "site": site,
+                "label": label,
+                "hostname": hostname,
+                "local_port": port,
+                "started_at": int(time.time()),
+            }
+        )
+        lines.append(f"[OK] {label}: {hostname} -> 127.0.0.1:{port} (pid {p.pid})")
+
+    if want_ssh:
+        launch("ssh", ssh)
+    if want_db and ok:
+        launch("db", db)
+    elif want_db and not ok:
+        pass
+
+    if new_procs:
+        procs.extend(new_procs)
+        write_state({"processes": procs})
+
+    if ok and (want_ssh or want_db):
+        lines.append("")
+        lines.append("Conexión sugerida:")
+        if want_ssh and ssh:
+            lines.append(f"  ssh <usuario>@localhost -p {ssh['local_port']}")
+        if want_db and db:
+            lines.append(
+                f"  BD: host=127.0.0.1 port={db['local_port']} (cliente al puerto local)."
+            )
+
+    return ok, lines
+
+
+def cmd_start(args: argparse.Namespace) -> None:
+    ok, lines = start_site_services(args.site, args.services, Path(args.config))
+    out = sys.stdout if ok else sys.stderr
+    for line in lines:
+        print(line, file=out)
+    if not ok:
+        sys.exit(1)
+
+
+def stop_tunnels(site: str | None, label: str | None = None) -> list[str]:
+    """Detiene procesos registrados.
+
+    site=None: todos los procesos (label se ignora).
+    site='x': procesos de ese sitio; si además label='ssh'|'db', solo ese rol.
+    """
+    lines: list[str] = []
+    state = read_state()
+    procs: list[dict] = list(state.get("processes", []))
+    if not procs:
+        lines.append("No hay procesos registrados.")
+        return lines
+    remaining: list[dict] = []
+    for row in procs:
+        if site is not None and row.get("site") != site:
+            remaining.append(row)
+            continue
+        if label is not None and row.get("label") != label:
+            remaining.append(row)
+            continue
+        pid = int(row["pid"])
+        kill_pid(pid)
+        lines.append(f"Detenido pid {pid} ({row.get('label')} {row.get('hostname')})")
+    write_state({"processes": remaining})
+    return lines
+
+
+def cmd_stop(args: argparse.Namespace) -> None:
+    for line in stop_tunnels(args.site):
+        print(line)
+
+
+def cmd_status(_args: argparse.Namespace) -> None:
+    state = read_state()
+    procs: list[dict] = list(state.get("processes", []))
+    if not procs:
+        print("Sin túneles registrados en state.")
+        return
+    for row in procs:
+        pid = int(row["pid"])
+        alive = pid_alive(pid)
+        print(
+            f"{'vivo' if alive else 'muerto':4} pid={pid} site={row.get('site')} "
+            f"{row.get('label')} {row.get('hostname')} -> localhost:{row.get('local_port')}"
+        )
+
+
+def pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        r = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}"],
+            capture_output=True,
+            text=True,
+        )
+        return str(pid) in (r.stdout or "")
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def cmd_list_sites(args: argparse.Namespace) -> None:
+    cfg = load_config(Path(args.config))
+    for name in sorted((cfg.get("sites") or {}).keys()):
+        print(name)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Túneles cloudflared access tcp")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_init = sub.add_parser("init-config", help="Copia tunnels.example.json -> tunnels.json")
+    p_init.set_defaults(func=cmd_init_example)
+
+    p_list = sub.add_parser("list-sites", help="Lista sitios del JSON")
+    p_list.add_argument("--config", default=str(default_config_path()))
+    p_list.set_defaults(func=cmd_list_sites)
+
+    p_start = sub.add_parser("start", help="Levanta túneles para un sitio")
+    p_start.add_argument("site")
+    p_start.add_argument(
+        "--services",
+        choices=("ssh", "db", "both"),
+        default="both",
+        help="Qué túneles abrir (default: both)",
+    )
+    p_start.add_argument("--config", default=str(default_config_path()))
+    p_start.set_defaults(func=cmd_start)
+
+    p_stop = sub.add_parser("stop", help="Mata procesos registrados (opcional: por sitio)")
+    p_stop.add_argument("--site", default=None, help="Solo este sitio; si se omite, todos")
+    p_stop.set_defaults(func=cmd_stop)
+
+    p_stat = sub.add_parser("status", help="Muestra estado de PIDs guardados")
+    p_stat.set_defaults(func=cmd_status)
+
+    ns = parser.parse_args()
+    ns.func(ns)
+
+
+if __name__ == "__main__":
+    main()
