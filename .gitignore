@@ -1,8 +1,7 @@
-.venv/
-.cloudflared-tunnels/
+.venv
+.cloudflared-tunnels
 .atlasvpn/
 .cursor/
-
 scripts/tunnels.json
 .cloudflared-tunnels/
 ui/node_modules/
