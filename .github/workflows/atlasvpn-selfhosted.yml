@@ -52,9 +52,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f scripts/tunnels.json ]]; then
-            echo "Creando scripts/tunnels.json desde plantilla (no estaba en el repo)."
+          if [[ -f scripts/tunnels.json ]]; then
+            exit 0
+          fi
+          echo "Creando scripts/tunnels.json (no presente en el checkout)."
+          if [[ -f scripts/tunnels.example.json ]]; then
             cp scripts/tunnels.example.json scripts/tunnels.json
+          else
+            echo "Aviso: falta scripts/tunnels.example.json; generando JSON mínimo."
+            printf '%s\n' '{"meta":{"created_by":"github-actions"},"sites":{}}' > scripts/tunnels.json
           fi
 
       - name: Docker y Compose
