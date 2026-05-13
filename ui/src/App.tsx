@@ -5,6 +5,7 @@ import {
   Cloud,
   Database,
   Loader2,
+  LogOut,
   Pencil,
   PlusCircle,
   RefreshCw,
@@ -14,7 +15,7 @@ import {
   Trash2,
   Wifi,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 type SiteRow = {
   id: string;
@@ -27,6 +28,14 @@ type SiteRow = {
 };
 
 type SitesResponse = { configPath: string; domainSuffix?: string; sites: SiteRow[] };
+
+type AuthUser = { username: string; role: "admin" | "operator" | "viewer" };
+
+type AuthStatusResponse = {
+  needsBootstrap: boolean;
+  authenticated: boolean;
+  user?: { username: string; role: string };
+};
 
 /** Resumen por sitio: prioriza caídos, luego activos, luego reposo. */
 function siteTunnelSummary(s: SiteRow): {
@@ -67,6 +76,7 @@ function siteTunnelDotClass(tone: "up" | "down" | "idle"): string {
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, {
+    credentials: "include",
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
@@ -75,6 +85,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ok?: boolean;
     detail?: string | { msg: string }[];
   };
+  if (r.status === 401) {
+    window.dispatchEvent(new CustomEvent("atlasvpn-unauthorized"));
+  }
   if (!r.ok) {
     let msg = data.message;
     if (!msg && typeof data.detail === "string") msg = data.detail;
@@ -126,7 +139,228 @@ function StatusPill({ kind }: { kind: string }) {
   );
 }
 
+function AuthBootstrapPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
+  const [user, setUser] = useState("");
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr("");
+    if (pw !== pw2) {
+      setErr("Las contraseñas no coinciden.");
+      return;
+    }
+    if (pw.length < 12) {
+      setErr("Mínimo 12 caracteres.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api<{ ok: boolean; user: { username: string; role: string } }>(
+        "/api/auth/bootstrap",
+        {
+          method: "POST",
+          body: JSON.stringify({ username: user.trim(), password: pw }),
+        }
+      );
+      onDone({ username: r.user.username, role: r.user.role as AuthUser["role"] });
+    } catch (ex) {
+      setErr(String(ex));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-cf-ink px-4 text-zinc-100 vpn-grid-bg">
+      <form
+        onSubmit={(e) => void submit(e)}
+        className="w-full max-w-sm space-y-4 rounded-2xl border border-cf-line bg-cf-card/90 p-8 ring-1 ring-white/5"
+      >
+        <h1 className="text-xl font-semibold">Configurar AtlasVPN</h1>
+        <p className="text-sm text-zinc-400">
+          Crea el usuario administrador (contraseña de al menos 12 caracteres).
+        </p>
+        {err ? <p className="text-sm text-rose-300">{err}</p> : null}
+        <input
+          className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
+          placeholder="Usuario"
+          value={user}
+          onChange={(e) => setUser(e.target.value)}
+          autoComplete="username"
+          required
+        />
+        <input
+          className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
+          placeholder="Contraseña"
+          type="password"
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+          autoComplete="new-password"
+          required
+        />
+        <input
+          className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
+          placeholder="Repetir contraseña"
+          type="password"
+          value={pw2}
+          onChange={(e) => setPw2(e.target.value)}
+          autoComplete="new-password"
+          required
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className="w-full rounded-xl bg-cf-orange py-2.5 text-sm font-semibold text-black disabled:opacity-50"
+        >
+          {busy ? "Creando…" : "Crear administrador"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function AuthLoginPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
+  const [user, setUser] = useState("");
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr("");
+    setBusy(true);
+    try {
+      const r = await api<{ ok: boolean; user: { username: string; role: string } }>(
+        "/api/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify({ username: user.trim(), password: pw }),
+        }
+      );
+      onDone({ username: r.user.username, role: r.user.role as AuthUser["role"] });
+    } catch (ex) {
+      setErr(String(ex));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-cf-ink px-4 text-zinc-100 vpn-grid-bg">
+      <form
+        onSubmit={(e) => void submit(e)}
+        className="w-full max-w-sm space-y-4 rounded-2xl border border-cf-line bg-cf-card/90 p-8 ring-1 ring-white/5"
+      >
+        <h1 className="text-xl font-semibold">Iniciar sesión</h1>
+        <p className="text-sm text-zinc-400">Acceso a la consola AtlasVPN.</p>
+        {err ? <p className="text-sm text-rose-300">{err}</p> : null}
+        <input
+          className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
+          placeholder="Usuario"
+          value={user}
+          onChange={(e) => setUser(e.target.value)}
+          autoComplete="username"
+          required
+        />
+        <input
+          className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
+          placeholder="Contraseña"
+          type="password"
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+          autoComplete="current-password"
+          required
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className="w-full rounded-xl bg-cf-orange py-2.5 text-sm font-semibold text-black disabled:opacity-50"
+        >
+          {busy ? "Entrando…" : "Entrar"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function AdminUserInvite() {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"operator" | "viewer" | "admin">("operator");
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr("");
+    setOk("");
+    if (password.length < 12) {
+      setErr("La contraseña debe tener al menos 12 caracteres.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/api/auth/users", {
+        method: "POST",
+        body: JSON.stringify({ username: username.trim(), password, role }),
+      });
+      setOk(`Usuario «${username.trim()}» creado.`);
+      setUsername("");
+      setPassword("");
+      setRole("operator");
+    } catch (ex) {
+      setErr(String(ex));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form
+      onSubmit={(e) => void submit(e)}
+      className="mt-4 space-y-3 rounded-xl border border-cf-line/80 bg-black/20 p-4"
+    >
+      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Nuevo usuario</p>
+      {err ? <p className="text-xs text-rose-300">{err}</p> : null}
+      {ok ? <p className="text-xs text-emerald-400">{ok}</p> : null}
+      <input
+        className="w-full rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
+        placeholder="Nombre de usuario"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        autoComplete="off"
+      />
+      <input
+        className="w-full rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
+        placeholder="Contraseña (≥12)"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        autoComplete="new-password"
+      />
+      <select
+        className="w-full rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
+        value={role}
+        onChange={(e) => setRole(e.target.value as typeof role)}
+      >
+        <option value="operator">Operador (túneles, sin credenciales Cloudflare)</option>
+        <option value="viewer">Solo lectura</option>
+        <option value="admin">Administrador</option>
+      </select>
+      <button
+        type="submit"
+        disabled={busy}
+        className="rounded-lg bg-cf-orange px-4 py-2 text-xs font-semibold text-black disabled:opacity-50"
+      >
+        {busy ? "Creando…" : "Crear usuario"}
+      </button>
+    </form>
+  );
+}
+
 export default function App() {
+  const [authPhase, setAuthPhase] = useState<"loading" | "bootstrap" | "login" | "app">("loading");
+  const [me, setMe] = useState<AuthUser | null>(null);
+
   const [tab, setTab] = useState<"conn" | "cf" | "poslite" | "about">("conn");
   const [sites, setSites] = useState<SiteRow[]>([]);
   const [configPath, setConfigPath] = useState("");
@@ -135,6 +369,7 @@ export default function App() {
   const [logOpen, setLogOpen] = useState(true);
   const [logs, setLogs] = useState<string[]>([]);
   const logRef = useRef<HTMLPreElement>(null);
+  const autoSyncStarted = useRef(false);
 
   const [acc, setAcc] = useState("");
   const [tok, setTok] = useState("");
@@ -151,6 +386,53 @@ export default function App() {
     setLogs((prev) => [...prev, ...lines].slice(-200));
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch("/api/auth/status", { credentials: "include" });
+        const s = (await r.json()) as AuthStatusResponse;
+        if (s.needsBootstrap) {
+          setAuthPhase("bootstrap");
+          return;
+        }
+        if (s.authenticated && s.user) {
+          setMe({
+            username: s.user.username,
+            role: s.user.role as AuthUser["role"],
+          });
+          setAuthPhase("app");
+          return;
+        }
+        setAuthPhase("login");
+      } catch {
+        setAuthPhase("login");
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    const h = () => {
+      autoSyncStarted.current = false;
+      setMe(null);
+      setAuthPhase("login");
+      setTab("conn");
+    };
+    window.addEventListener("atlasvpn-unauthorized", h);
+    return () => window.removeEventListener("atlasvpn-unauthorized", h);
+  }, []);
+
+  const doLogout = useCallback(async () => {
+    try {
+      await api("/api/auth/logout", { method: "POST", body: "{}" });
+    } catch {
+      /* ignore */
+    }
+    autoSyncStarted.current = false;
+    setMe(null);
+    setAuthPhase("login");
+    setTab("conn");
+  }, []);
+
   const loadSites = useCallback(async () => {
     try {
       const d = await api<SitesResponse>("/api/sites");
@@ -162,16 +444,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (authPhase !== "app") return;
     void loadSites();
     const t = window.setInterval(() => void loadSites(), 3000);
     return () => window.clearInterval(t);
-  }, [loadSites]);
+  }, [authPhase, loadSites]);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
   }, [logs]);
 
   useEffect(() => {
+    if (authPhase !== "app" || !me) return;
     void (async () => {
       try {
         const s = await api<{
@@ -191,10 +475,10 @@ export default function App() {
         /* ignore */
       }
     })();
-  }, []);
+  }, [authPhase, me]);
 
-  const autoSyncStarted = useRef(false);
   useEffect(() => {
+    if (authPhase !== "app" || me?.role !== "admin") return;
     if (autoSyncStarted.current) return;
     if (!acc.trim() || !tok.trim()) return;
     autoSyncStarted.current = true;
@@ -232,7 +516,11 @@ export default function App() {
         setSyncing(false);
       }
     })();
-  }, [acc, tok, suf, zone, appendLog, loadSites]);
+  }, [authPhase, me, acc, tok, suf, zone, appendLog, loadSites]);
+
+  useEffect(() => {
+    if (me && me.role !== "admin" && tab === "cf") setTab("conn");
+  }, [me, tab]);
 
   const doStart = async (site: string, services: "ssh" | "db" | "both") => {
     try {
@@ -408,6 +696,30 @@ export default function App() {
     setCfCredentialsLocked(false);
   };
 
+  if (authPhase === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-cf-ink text-zinc-400">
+        <Loader2 className="h-10 w-10 animate-spin text-cf-orange" aria-hidden />
+      </div>
+    );
+  }
+  if (authPhase === "bootstrap") {
+    return <AuthBootstrapPanel onDone={(u) => { setMe(u); setAuthPhase("app"); }} />;
+  }
+  if (authPhase === "login") {
+    return <AuthLoginPanel onDone={(u) => { setMe(u); setAuthPhase("app"); }} />;
+  }
+  if (!me) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-cf-ink text-zinc-400">
+        <Loader2 className="h-10 w-10 animate-spin text-cf-orange" aria-hidden />
+      </div>
+    );
+  }
+
+  const canOperate = me.role !== "viewer";
+  const canAdmin = me.role === "admin";
+
   type TabId = "conn" | "cf" | "poslite" | "about";
   const TabBtn = ({
     id,
@@ -457,11 +769,27 @@ export default function App() {
               </p>
             </div>
           </div>
-          <nav className="flex flex-wrap items-center gap-1.5 rounded-2xl bg-black/30 p-1 ring-1 ring-white/5">
+          <nav className="flex flex-wrap items-center gap-2 rounded-2xl bg-black/30 p-1 ring-1 ring-white/5 sm:gap-1.5">
             <TabBtn id="conn" label="Conexiones" Icon={Wifi} />
             <TabBtn id="poslite" label="Poslite" Icon={Store} />
-            <TabBtn id="cf" label="Cloudflare" Icon={Cloud} />
+            {canAdmin ? <TabBtn id="cf" label="Cloudflare" Icon={Cloud} /> : null}
             <TabBtn id="about" label="Acerca de" Icon={Shield} />
+            <div className="mx-1 hidden h-8 w-px bg-white/10 sm:block" aria-hidden />
+            <div className="flex items-center gap-2 rounded-xl px-2 py-1 text-xs text-zinc-400">
+              <span className="max-w-[7rem] truncate font-medium text-zinc-200">{me.username}</span>
+              <span className="rounded-md bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] uppercase text-zinc-400">
+                {me.role}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void doLogout()}
+              className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-zinc-400 ring-1 ring-transparent hover:bg-white/5 hover:text-zinc-200"
+              title="Cerrar sesión"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Salir</span>
+            </button>
           </nav>
         </div>
       </header>
@@ -577,6 +905,8 @@ export default function App() {
                             className="overflow-hidden border-t border-cf-line/80 bg-black/25"
                           >
                             <div className="flex flex-col gap-2 p-3">
+                              {canOperate ? (
+                                <>
                               <div className="flex flex-wrap gap-2">
                                 {s.ssh ? (
                                   s.sshStatus === "active" ? (
@@ -684,6 +1014,12 @@ export default function App() {
                                   </motion.button>
                                 ) : null}
                               </div>
+                                </>
+                              ) : (
+                                <p className="text-center text-xs text-zinc-500">
+                                  Solo lectura: tu rol no permite iniciar o detener túneles.
+                                </p>
+                              )}
                             </div>
                           </motion.div>
                         ) : null}
@@ -705,6 +1041,7 @@ export default function App() {
                     >
                       {logOpen ? "Ocultar registro" : "Mostrar registro"}
                     </button>
+                    {canOperate ? (
                     <motion.button
                       type="button"
                       whileHover={{ scale: 1.02 }}
@@ -716,6 +1053,7 @@ export default function App() {
                     >
                       Detener todo
                     </motion.button>
+                    ) : null}
                   </div>
                 </div>
                 {logOpen ? (
@@ -736,7 +1074,7 @@ export default function App() {
           </motion.div>
         )}
 
-        {tab === "cf" && (
+        {canAdmin && tab === "cf" && (
           <motion.div
             key="cf"
             initial={{ opacity: 0, y: 8 }}
@@ -943,11 +1281,28 @@ export default function App() {
                 <p className="mt-2 text-sm leading-relaxed text-zinc-400">{c.b}</p>
               </motion.div>
             ))}
+            {canAdmin ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="rounded-2xl border border-cf-line bg-cf-card/80 p-6 ring-1 ring-white/[0.03]"
+              >
+                <h3 className="font-semibold text-cf-orange">Usuarios y roles</h3>
+                <p className="mt-2 text-sm text-zinc-400">
+                  Los administradores pueden crear cuentas con rol operador (gestión de túneles) o
+                  visor (solo estado). Contraseñas mínimo 12 caracteres.
+                </p>
+                <AdminUserInvite />
+              </motion.div>
+            ) : null}
           </motion.div>
         )}
       </main>
 
-      {/* Sincronización Cloudflare: acceso fijo en esquina (visible en todas las pestañas) */}
+      {canAdmin ? (
+      <>
+      {/* Sincronización Cloudflare: acceso fijo en esquina (solo administradores) */}
       <div className="pointer-events-none fixed bottom-4 right-4 z-[70] flex max-w-[min(100vw-1.5rem,20rem)] flex-col items-end gap-1.5 sm:bottom-5 sm:right-5">
         <div className="pointer-events-auto flex flex-col gap-1.5 rounded-2xl border border-cf-line/90 bg-cf-panel/95 px-3 py-2.5 shadow-2xl shadow-black/40 ring-1 ring-white/10 backdrop-blur-md">
           <div className="flex items-center gap-2">
@@ -999,6 +1354,8 @@ export default function App() {
           </div>
         </div>
       </div>
+      </>
+      ) : null}
     </div>
   );
 }

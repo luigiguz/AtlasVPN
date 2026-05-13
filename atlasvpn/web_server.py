@@ -10,13 +10,15 @@ import sys
 import threading
 import time
 import webbrowser
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.middleware.sessions import SessionMiddleware
 
 from atlasvpn.cf_sync import CfSyncError, sync_to_tunnels_json
 from atlasvpn.constants import SSH_LOCAL_USER
@@ -24,6 +26,15 @@ from atlasvpn.pgadmin_launch import launch_pgadmin
 from atlasvpn.poslite_urls import poslite_links_for_site
 from atlasvpn.paths import PACKAGE_DIR, PROJECT_ROOT, resolve_logo_path
 from atlasvpn.settings_store import load_settings, save_settings
+from atlasvpn.web_auth import (
+    assert_login_allowed,
+    clear_failed_logins,
+    current_user,
+    register_failed_login,
+    require_roles,
+    session_middleware_config,
+)
+from atlasvpn.web_users import audit, count_users, create_user, init_db, verify_login
 
 _SCRIPTS = PROJECT_ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -81,6 +92,22 @@ class OpenPgAdminBody(BaseModel):
     """Sitio opcional: si tiene BD en tunnels.json, se devuelve pista host/puerto local."""
 
     site: str = ""
+
+
+class LoginBody(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+class BootstrapBody(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=12, max_length=256)
+
+
+class CreateUserBody(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=12, max_length=256)
+    role: Literal["admin", "operator", "viewer"] = "operator"
 
 
 def _proc_for_site_label(state: dict, site: str, label: str) -> dict | None:
@@ -142,7 +169,13 @@ def _sites_payload(config_path: Path) -> dict[str, Any]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="AtlasVPN", version="1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        init_db()
+        yield
+
+    app = FastAPI(title="AtlasVPN", version="1.0", lifespan=lifespan)
+    app.add_middleware(SessionMiddleware, **session_middleware_config())
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -155,18 +188,93 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "Sin logo")
         return FileResponse(p, media_type="image/png")
 
+    @app.get("/api/auth/status")
+    def auth_status(request: Request) -> dict[str, Any]:
+        n = count_users()
+        u = request.session.get("user")
+        if isinstance(u, dict) and u.get("username") and u.get("role"):
+            return {
+                "needsBootstrap": False,
+                "authenticated": True,
+                "user": {"username": str(u["username"]), "role": str(u["role"])},
+            }
+        return {"needsBootstrap": n == 0, "authenticated": False}
+
+    @app.post("/api/auth/bootstrap")
+    def auth_bootstrap(request: Request, body: BootstrapBody) -> dict[str, Any]:
+        if count_users() > 0:
+            raise HTTPException(400, "Ya existe un usuario. Usa inicio de sesión.")
+        try:
+            create_user(body.username.strip(), body.password, "admin")
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        row = verify_login(body.username.strip(), body.password)
+        if not row:
+            raise HTTPException(500, "Error interno tras crear usuario.")
+        request.session["user"] = {
+            "username": row["username"],
+            "role": row["role"],
+            "id": row["id"],
+        }
+        audit("bootstrap", row["username"], "")
+        return {"ok": True, "user": {"username": row["username"], "role": row["role"]}}
+
+    @app.post("/api/auth/login")
+    def auth_login(request: Request, body: LoginBody) -> dict[str, Any]:
+        assert_login_allowed(request)
+        if count_users() == 0:
+            raise HTTPException(400, "Primero crea el usuario administrador (asistente inicial).")
+        row = verify_login(body.username.strip(), body.password)
+        if not row:
+            register_failed_login(request)
+            raise HTTPException(401, "Usuario o contraseña incorrectos.")
+        clear_failed_logins(request)
+        request.session["user"] = {
+            "username": row["username"],
+            "role": row["role"],
+            "id": row["id"],
+        }
+        audit("login_ok", row["username"], "")
+        return {"ok": True, "user": {"username": row["username"], "role": row["role"]}}
+
+    @app.post("/api/auth/logout")
+    def auth_logout(request: Request) -> dict[str, bool]:
+        u = request.session.pop("user", None)
+        if isinstance(u, dict) and u.get("username"):
+            audit("logout", str(u.get("username")), "")
+        return {"ok": True}
+
+    @app.post("/api/auth/users")
+    def auth_create_user(
+        body: CreateUserBody,
+        _admin: dict[str, Any] = Depends(require_roles("admin")),
+    ) -> dict[str, bool]:
+        try:
+            create_user(body.username.strip(), body.password, body.role)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        audit("user_created_by_admin", str(_admin.get("username")), body.username.strip().lower())
+        return {"ok": True}
+
     @app.get("/api/settings")
-    def get_settings() -> dict[str, str]:
+    def get_settings(user: dict[str, Any] = Depends(current_user)) -> dict[str, str]:
         s = load_settings()
-        return {
+        out = {
             "account_id": s.get("account_id", ""),
             "api_token": s.get("api_token", ""),
             "domain_suffix": s.get("domain_suffix", "asptienda.com"),
             "zone_id": s.get("zone_id", ""),
         }
+        if user.get("role") != "admin":
+            out["api_token"] = ""
+            out["account_id"] = "" if user.get("role") == "viewer" else out["account_id"]
+        return out
 
     @app.post("/api/settings")
-    def post_settings(body: SettingsBody) -> dict[str, str]:
+    def post_settings(
+        body: SettingsBody,
+        _admin: dict[str, Any] = Depends(require_roles("admin")),
+    ) -> dict[str, str]:
         save_settings(
             body.account_id,
             body.api_token,
@@ -176,18 +284,24 @@ def create_app() -> FastAPI:
         return {"ok": "true"}
 
     @app.get("/api/sites")
-    def get_sites() -> dict[str, Any]:
+    def get_sites(_user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
         return _sites_payload(tm.default_config_path())
 
     @app.post("/api/start")
-    def post_start(body: StartBody) -> dict[str, Any]:
+    def post_start(
+        body: StartBody,
+        _op: dict[str, Any] = Depends(require_roles("admin", "operator")),
+    ) -> dict[str, Any]:
         ok, lines = tm.start_site_services(
             body.site, body.services, tm.default_config_path()
         )
         return {"ok": ok, "lines": lines}
 
     @app.post("/api/stop")
-    def post_stop(body: StopBody) -> dict[str, Any]:
+    def post_stop(
+        body: StopBody,
+        _op: dict[str, Any] = Depends(require_roles("admin", "operator")),
+    ) -> dict[str, Any]:
         if body.label and body.site is None:
             raise HTTPException(
                 status_code=400,
@@ -199,7 +313,10 @@ def create_app() -> FastAPI:
         return {"ok": True, "lines": lines}
 
     @app.post("/api/sync")
-    def post_sync(body: SyncBody) -> dict[str, Any]:
+    def post_sync(
+        body: SyncBody,
+        _admin: dict[str, Any] = Depends(require_roles("admin")),
+    ) -> dict[str, Any]:
         try:
             n, msg = sync_to_tunnels_json(
                 body.account_id,
@@ -215,12 +332,15 @@ def create_app() -> FastAPI:
             )
 
     @app.post("/api/init-template")
-    def post_init() -> dict[str, Any]:
+    def post_init(_admin: dict[str, Any] = Depends(require_roles("admin"))) -> dict[str, Any]:
         ok, msg = tm.init_config_from_example()
         return {"ok": ok, "message": msg}
 
     @app.post("/api/open-ssh-terminal")
-    def post_open_ssh(body: OpenSshBody) -> dict[str, Any]:
+    def post_open_ssh(
+        body: OpenSshBody,
+        _op: dict[str, Any] = Depends(require_roles("admin", "operator")),
+    ) -> dict[str, Any]:
         cfg = tm.load_config_optional(tm.default_config_path())
         if not cfg:
             raise HTTPException(400, "Sin tunnels.json")
@@ -279,7 +399,10 @@ def create_app() -> FastAPI:
         return {"ok": True, "command": f"ssh {user}@localhost -p {port}"}
 
     @app.post("/api/open-pgadmin")
-    def post_open_pgadmin(body: OpenPgAdminBody) -> dict[str, Any]:
+    def post_open_pgadmin(
+        body: OpenPgAdminBody,
+        _op: dict[str, Any] = Depends(require_roles("admin", "operator")),
+    ) -> dict[str, Any]:
         hint: str | None = None
         site = (body.site or "").strip()
         if site:

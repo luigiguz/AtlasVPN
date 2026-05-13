@@ -10,6 +10,9 @@
 #   ATLASVPN_TAG=latest
 #   ATLASVPN_PORT=8765
 #   CLOUDFLARED_VERSION=2026.5.0
+#   ATLASVPN_SESSION_SECRET=<hex largo; obligatorio en producción, p. ej. openssl rand -hex 32>
+#   ATLASVPN_SECURE_COOKIES=1  (cookies solo HTTPS; detrás de proxy TLS)
+#   ATLASVPN_SESSION_MAX_AGE=604800
 
 name: atlasvpn
 
@@ -27,6 +30,9 @@ services:
       - "${ATLASVPN_PORT:-8765}:8765"
     environment:
       TZ: ${TZ:-UTC}
+      ATLASVPN_SESSION_SECRET: ${ATLASVPN_SESSION_SECRET:-}
+      ATLASVPN_SECURE_COOKIES: ${ATLASVPN_SECURE_COOKIES:-0}
+      ATLASVPN_SESSION_MAX_AGE: ${ATLASVPN_SESSION_MAX_AGE:-604800}
     volumes:
       - atlasvpn_settings:/app/.atlasvpn
       - atlasvpn_cloudflared:/app/.cloudflared-tunnels
