@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
+import { API_BASE, api, apiUrl, bearerHeaders, setAccessToken } from "./apiClient";
+
 type SiteRow = {
   id: string;
   name: string;
@@ -74,30 +76,6 @@ function siteTunnelDotClass(tone: "up" | "down" | "idle"): string {
   return "bg-zinc-500";
 }
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(path, {
-    credentials: "include",
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
-  const data = (await r.json().catch(() => ({}))) as {
-    message?: string;
-    ok?: boolean;
-    detail?: string | { msg: string }[];
-  };
-  if (r.status === 401) {
-    window.dispatchEvent(new CustomEvent("atlasvpn-unauthorized"));
-  }
-  if (!r.ok) {
-    let msg = data.message;
-    if (!msg && typeof data.detail === "string") msg = data.detail;
-    if (!msg && Array.isArray(data.detail) && data.detail[0] && typeof data.detail[0].msg === "string")
-      msg = data.detail[0].msg;
-    throw new Error(msg || r.statusText);
-  }
-  return data as T;
-}
-
 const listVariants = {
   hidden: { opacity: 0 },
   show: {
@@ -149,13 +127,15 @@ function AuthLoginPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
     setErr("");
     setBusy(true);
     try {
-      const r = await api<{ ok: boolean; user: { username: string; role: string } }>(
+      const r = await api<{ ok: boolean; user: { username: string; role: string }; access_token?: string }>(
         "/api/auth/login",
         {
           method: "POST",
           body: JSON.stringify({ username: user.trim(), password: pw }),
         }
       );
+      if (r.access_token) setAccessToken(r.access_token);
+      else setAccessToken(null);
       onDone({ username: r.user.username, role: r.user.role as AuthUser["role"] });
     } catch (ex) {
       setErr(String(ex));
@@ -362,22 +342,24 @@ function UsersAdminPage({ me }: { me: AuthUser }) {
             required
           />
         </div>
-        <select
-          className="w-full rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm sm:max-w-md"
-          value={cuRole}
-          onChange={(e) => setCuRole(e.target.value as typeof cuRole)}
-        >
-          <option value="operator">Operador (túneles, sin credenciales Cloudflare)</option>
-          <option value="viewer">Solo lectura</option>
-          <option value="admin">Administrador</option>
-        </select>
-        <button
-          type="submit"
-          disabled={cuBusy}
-          className="rounded-lg bg-cf-orange px-4 py-2 text-xs font-semibold text-black disabled:opacity-50"
-        >
-          {cuBusy ? "Creando…" : "Crear usuario"}
-        </button>
+        <div className="flex flex-col gap-3 pt-0.5 sm:flex-row sm:items-stretch sm:gap-4">
+          <select
+            className="min-h-[42px] w-full min-w-0 flex-1 rounded-lg border border-cf-line bg-cf-panel px-3 py-2 text-sm"
+            value={cuRole}
+            onChange={(e) => setCuRole(e.target.value as typeof cuRole)}
+          >
+            <option value="operator">Operador (túneles, sin credenciales Cloudflare)</option>
+            <option value="viewer">Solo lectura</option>
+            <option value="admin">Administrador</option>
+          </select>
+          <button
+            type="submit"
+            disabled={cuBusy}
+            className="h-[42px] w-full shrink-0 rounded-lg bg-cf-orange px-5 text-xs font-semibold text-black disabled:opacity-50 sm:w-auto sm:self-center"
+          >
+            {cuBusy ? "Creando…" : "Crear usuario"}
+          </button>
+        </div>
       </form>
 
       {loadErr ? <p className="text-sm text-rose-300">{loadErr}</p> : null}
@@ -414,8 +396,9 @@ function UsersAdminPage({ me }: { me: AuthUser }) {
                       <button
                         type="button"
                         disabled={u.username === me.username}
+                        title={u.username === me.username ? "No puedes eliminar tu propia sesión" : undefined}
                         onClick={() => void doDelete(u.username)}
-                        className="rounded-lg bg-rose-950/80 px-2.5 py-1.5 text-xs font-medium text-rose-100 ring-1 ring-rose-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded-lg bg-rose-950/80 px-2.5 py-1.5 text-xs font-medium text-rose-100 ring-1 ring-rose-500/40 hover:bg-rose-900/80 disabled:cursor-not-allowed disabled:bg-zinc-900/50 disabled:text-zinc-500 disabled:ring-zinc-600/60"
                       >
                         Eliminar
                       </button>
@@ -510,7 +493,10 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await fetch("/api/auth/status", { credentials: "include" });
+        const r = await fetch(apiUrl("/api/auth/status"), {
+          credentials: API_BASE ? "omit" : "include",
+          headers: { ...bearerHeaders() },
+        });
         const s = (await r.json()) as AuthStatusResponse;
         if (s.authenticated && s.user) {
           setMe({
@@ -530,6 +516,7 @@ export default function App() {
   useEffect(() => {
     const h = () => {
       autoSyncStarted.current = false;
+      setAccessToken(null);
       setMe(null);
       setAuthPhase("login");
       setTab("conn");
@@ -544,6 +531,7 @@ export default function App() {
     } catch {
       /* ignore */
     }
+    setAccessToken(null);
     autoSyncStarted.current = false;
     setMe(null);
     setAuthPhase("login");
@@ -867,7 +855,7 @@ export default function App() {
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div className="flex min-w-0 flex-1 items-center gap-4">
             <img
-              src="/api/logo"
+              src={apiUrl("/api/logo")}
               alt=""
               className="h-10 w-auto max-w-[160px] object-contain opacity-95"
               onError={(e) => {

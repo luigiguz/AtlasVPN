@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request
 
 from atlasvpn.paths import ATLAS_DATA_DIR
+from atlasvpn.web_tokens import decode_access_token
 
 SESSION_SECRET_FILE = ATLAS_DATA_DIR / "session.secret"
 
@@ -79,13 +80,39 @@ def clear_failed_logins(request: Request) -> None:
     _failed_logins.pop(ip, None)
 
 
-def current_user(request: Request) -> dict[str, Any]:
+def _bearer_token(request: Request) -> str | None:
+    h = request.headers.get("Authorization") or ""
+    if len(h) < 8 or h[:7].lower() != "bearer ":
+        return None
+    return h[7:].strip() or None
+
+
+def resolve_user_dict(request: Request) -> dict[str, Any] | None:
+    """Usuario desde Authorization Bearer (JWT) o cookie de sesión."""
+    tok = _bearer_token(request)
+    if tok:
+        payload = decode_access_token(tok)
+        if payload:
+            try:
+                uid = int(payload.get("uid", 0))
+            except (TypeError, ValueError):
+                uid = 0
+            return {
+                "username": str(payload["sub"]),
+                "role": str(payload["role"]),
+                "id": uid,
+            }
     raw = request.session.get("user")
-    if not raw or not isinstance(raw, dict):
+    if isinstance(raw, dict) and raw.get("username") and raw.get("role"):
+        return raw
+    return None
+
+
+def current_user(request: Request) -> dict[str, Any]:
+    u = resolve_user_dict(request)
+    if not u:
         raise HTTPException(status_code=401, detail="No autenticado")
-    if "username" not in raw or "role" not in raw:
-        raise HTTPException(status_code=401, detail="Sesión inválida")
-    return raw
+    return u
 
 
 def require_roles(*roles: str):

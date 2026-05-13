@@ -8,6 +8,7 @@ itsdangerous>=2.1.0
 uvicorn[standard]>=0.32.0
 pywebview>=5.0
 argon2-cffi>=23.1.0
+PyJWT>=2.8.0
 
 # Cliente oficial Cloudflare (útil para scripts/API; la sincronización de AtlasVPN usa REST v4 con el mismo token)
 cloudflare>=3.1.0

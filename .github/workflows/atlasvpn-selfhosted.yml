@@ -12,8 +12,10 @@ on:
       - "Logos/**"
       - "requirements.txt"
       - "Dockerfile"
+      - "Dockerfile.ui"
       - "docker-entrypoint.sh"
       - "docker-compose.yml"
+      - "deploy/**"
       - ".github/workflows/atlasvpn-selfhosted.yml"
   workflow_dispatch:
     inputs:
@@ -41,8 +43,10 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: atlasvpn
       DOCKER_BUILDKIT: "1"
-      ATLASVPN_IMAGE: atlasvpn
+      ATLASVPN_API_IMAGE: atlasvpn-api
+      ATLASVPN_UI_IMAGE: atlasvpn-ui
       ATLASVPN_TAG: ${{ github.sha }}
+      ATLASVPN_PUBLIC_API_URL: http://127.0.0.1:8765
 
     steps:
       - name: Checkout
@@ -84,7 +88,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker tag "${ATLASVPN_IMAGE}:${ATLASVPN_TAG}" "${ATLASVPN_IMAGE}:latest"
+          docker tag "${ATLASVPN_API_IMAGE}:${ATLASVPN_TAG}" "${ATLASVPN_API_IMAGE}:latest"
+          docker tag "${ATLASVPN_UI_IMAGE}:${ATLASVPN_TAG}" "${ATLASVPN_UI_IMAGE}:latest"
 
       - name: Desplegar (Compose)
         shell: bash
@@ -102,17 +107,23 @@ jobs:
       - name: Comprobar HTTP (local)
         shell: bash
         env:
-          ATLASVPN_PORT: "8765"
+          ATLASVPN_API_PORT: "8765"
+          ATLASVPN_UI_PORT: "8080"
         run: |
           set -euo pipefail
           sleep 3
-          url="http://127.0.0.1:${ATLASVPN_PORT}/"
+          api_url="http://127.0.0.1:${ATLASVPN_API_PORT}/api/health"
+          ui_url="http://127.0.0.1:${ATLASVPN_UI_PORT}/"
           if command -v curl >/dev/null 2>&1; then
-            code="$(curl -fsS -o /dev/null -w "%{http_code}" "$url" || true)"
-            echo "HTTP $code"
-            [[ "$code" == "200" ]] || [[ "$code" == "302" ]] || [[ "$code" == "307" ]]
+            api_code="$(curl -fsS -o /dev/null -w "%{http_code}" "$api_url" || true)"
+            echo "API HTTP $api_code $api_url"
+            [[ "$api_code" == "200" ]]
+            ui_code="$(curl -fsS -o /dev/null -w "%{http_code}" "$ui_url" || true)"
+            echo "UI HTTP $ui_code $ui_url"
+            [[ "$ui_code" == "200" ]] || [[ "$ui_code" == "304" ]]
           elif command -v wget >/dev/null 2>&1; then
-            wget -qO- "$url" >/dev/null
+            wget -qO- "$api_url" >/dev/null
+            wget -qO- "$ui_url" >/dev/null
           else
             echo "Aviso: sin curl ni wget en el runner; omitiendo comprobación HTTP."
           fi
@@ -120,4 +131,4 @@ jobs:
       - name: Logs del servicio (solo si falló antes)
         if: failure()
         shell: bash
-        run: docker compose -f docker-compose.yml logs --no-color --tail=80 atlasvpn || true
+        run: docker compose -f docker-compose.yml logs --no-color --tail=80 atlasvpn-api atlasvpn-ui || true

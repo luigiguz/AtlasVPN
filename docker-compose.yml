@@ -1,55 +1,70 @@
-# AtlasVPN en el mismo host donde compila el runner (p. ej. Raspberry Pi ARM64).
-# Requisitos: Docker Compose v2, `scripts/tunnels.json` (o créalo desde el ejemplo).
+# AtlasVPN: API (FastAPI) + UI (nginx) en contenedores separados.
 #
-# Uso local en la RPi:
-#   cp -n scripts/tunnels.example.json scripts/tunnels.json   # solo la primera vez
-#   docker compose up -d --build
+# En el navegador la UI debe conocer la URL pública del API. Pásala al *build* de la imagen UI, p. ej.:
+#   ATLASVPN_PUBLIC_API_URL=https://api-atlas.tu-dominio.com docker compose build atlasvpn-ui
+# O en un fichero .env:
+#   ATLASVPN_PUBLIC_API_URL=https://...
 #
-# Variables opcionales (export o fichero .env al lado de este archivo):
-#   ATLASVPN_IMAGE=atlasvpn
-#   ATLASVPN_TAG=latest
-#   ATLASVPN_PORT=8765
-#   CLOUDFLARED_VERSION=2026.5.0
-#   ATLASVPN_SESSION_SECRET=<hex largo; obligatorio en producción, p. ej. openssl rand -hex 32>
-#   ATLASVPN_SECURE_COOKIES=1  (cookies solo HTTPS; detrás de proxy TLS)
-#   ATLASVPN_SESSION_MAX_AGE=604800
-#   ATLASVPN_DEFAULT_ADMIN_USERNAME=admin
-#   ATLASVPN_DEFAULT_ADMIN_PASSWORD=<≥12 caracteres; recomendado en producción>
-#   Si la BD de usuarios está vacía y no defines la contraseña, se usa la inicial
-#   AtlasVPN_Admin_Initial12 (cámbiala en cuanto entres).
+# CORS del API: por defecto incluye https://atlas-vpn.verkku.com (y localhost:5173 para Vite).
+#   ATLASVPN_CORS_ORIGINS=https://atlas-vpn.verkku.com,https://otro-origen.com
+#
+# Puertos por defecto: API 8765, UI 8080 (mapea el túnel Cloudflare al que corresponda).
 
 name: atlasvpn
 
 services:
-  atlasvpn:
+  atlasvpn-api:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         CLOUDFLARED_VERSION: ${CLOUDFLARED_VERSION:-2026.5.0}
-    image: ${ATLASVPN_IMAGE:-atlasvpn}:${ATLASVPN_TAG:-latest}
-    container_name: atlasvpn
+    image: ${ATLASVPN_API_IMAGE:-atlasvpn-api}:${ATLASVPN_TAG:-latest}
+    container_name: atlasvpn-api
     restart: unless-stopped
     ports:
-      - "${ATLASVPN_PORT:-8765}:8765"
+      - "${ATLASVPN_API_PORT:-8765}:8765"
     environment:
       TZ: ${TZ:-UTC}
+      ATLASVPN_API_ONLY: "1"
       ATLASVPN_SESSION_SECRET: ${ATLASVPN_SESSION_SECRET:-}
+      ATLASVPN_JWT_SECRET: ${ATLASVPN_JWT_SECRET:-}
       ATLASVPN_SECURE_COOKIES: ${ATLASVPN_SECURE_COOKIES:-0}
       ATLASVPN_SESSION_MAX_AGE: ${ATLASVPN_SESSION_MAX_AGE:-604800}
       ATLASVPN_DEFAULT_ADMIN_USERNAME: ${ATLASVPN_DEFAULT_ADMIN_USERNAME:-admin}
       ATLASVPN_DEFAULT_ADMIN_PASSWORD: ${ATLASVPN_DEFAULT_ADMIN_PASSWORD:-}
+      ATLASVPN_CORS_ORIGINS: ${ATLASVPN_CORS_ORIGINS:-https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173}
     volumes:
       - atlasvpn_settings:/app/.atlasvpn
       - atlasvpn_cloudflared:/app/.cloudflared-tunnels
-      # Sitios y puertos locales (persistente en el host del checkout)
       - ./scripts/tunnels.json:/app/scripts/tunnels.json:rw
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 25s
+
+  atlasvpn-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+      args:
+        VITE_API_BASE_URL: ${ATLASVPN_PUBLIC_API_URL:-}
+    image: ${ATLASVPN_UI_IMAGE:-atlasvpn-ui}:${ATLASVPN_TAG:-latest}
+    container_name: atlasvpn-ui
+    restart: unless-stopped
+    ports:
+      - "${ATLASVPN_UI_PORT:-8080}:80"
+    depends_on:
+      atlasvpn-api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
 volumes:
   atlasvpn_settings:

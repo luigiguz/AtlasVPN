@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import socket
 import subprocess
@@ -18,6 +19,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from atlasvpn.cf_sync import CfSyncError, sync_to_tunnels_json
@@ -32,8 +34,10 @@ from atlasvpn.web_auth import (
     current_user,
     register_failed_login,
     require_roles,
+    resolve_user_dict,
     session_middleware_config,
 )
+from atlasvpn.web_tokens import encode_access_token
 from atlasvpn.web_users import (
     audit,
     create_user,
@@ -51,6 +55,19 @@ if str(_SCRIPTS) not in sys.path:
 import tunnel_manager as tm
 
 STATIC_WEB = PACKAGE_DIR / "static" / "web"
+
+
+def _api_only() -> bool:
+    return os.environ.get("ATLASVPN_API_ONLY", "").lower() in ("1", "true", "yes")
+
+
+def _cors_origins() -> list[str]:
+    raw = os.environ.get(
+        "ATLASVPN_CORS_ORIGINS",
+        "https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173",
+    )
+    out = [x.strip() for x in raw.split(",") if x.strip()]
+    return out if out else ["https://atlas-vpn.verkku.com"]
 
 
 def _wait_tcp(host: str, port: int, timeout: float = 20.0) -> None:
@@ -186,6 +203,13 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="AtlasVPN", version="1.0", lifespan=lifespan)
     app.add_middleware(SessionMiddleware, **session_middleware_config())
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins(),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+    )
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -200,8 +224,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/auth/status")
     def auth_status(request: Request) -> dict[str, Any]:
-        u = request.session.get("user")
-        if isinstance(u, dict) and u.get("username") and u.get("role"):
+        u = resolve_user_dict(request)
+        if u and u.get("username") and u.get("role"):
             return {
                 "authenticated": True,
                 "user": {"username": str(u["username"]), "role": str(u["role"])},
@@ -222,13 +246,23 @@ def create_app() -> FastAPI:
             "id": row["id"],
         }
         audit("login_ok", row["username"], "")
-        return {"ok": True, "user": {"username": row["username"], "role": row["role"]}}
+        token = encode_access_token(
+            username=str(row["username"]),
+            role=str(row["role"]),
+            user_id=int(row["id"]),
+        )
+        return {
+            "ok": True,
+            "user": {"username": row["username"], "role": row["role"]},
+            "access_token": token,
+        }
 
     @app.post("/api/auth/logout")
     def auth_logout(request: Request) -> dict[str, bool]:
-        u = request.session.pop("user", None)
+        u = resolve_user_dict(request)
         if isinstance(u, dict) and u.get("username"):
             audit("logout", str(u.get("username")), "")
+        request.session.pop("user", None)
         return {"ok": True}
 
     @app.get("/api/auth/users")
@@ -445,7 +479,13 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=msg)
         return {"ok": True, "executable": msg, "hint": hint}
 
-    if STATIC_WEB.is_dir() and (STATIC_WEB / "index.html").is_file():
+    if _api_only():
+
+        @app.get("/")
+        def root_api() -> dict[str, str]:
+            return {"service": "atlasvpn-api", "status": "ok"}
+
+    elif STATIC_WEB.is_dir() and (STATIC_WEB / "index.html").is_file():
         assets_dir = STATIC_WEB / "assets"
         if assets_dir.is_dir():
             app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
@@ -466,6 +506,9 @@ def create_app() -> FastAPI:
 
 def run_web_desktop(host: str = "127.0.0.1", port: int = 8765) -> None:
     """Ventana de escritorio (WebView2 / pywebview) con la misma UI React; sin navegador externo."""
+    if _api_only():
+        print("ATLASVPN_API_ONLY=1: la UI integrada requiere estáticos; ejecuta sin esta variable.", file=sys.stderr)
+        sys.exit(2)
     if not (STATIC_WEB / "index.html").is_file():
         print(
             "AtlasVPN (web): no se encontró la UI compilada.\n"
@@ -534,7 +577,9 @@ def run_web_desktop(host: str = "127.0.0.1", port: int = 8765) -> None:
 
 
 def run_web_server(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
-    if not (STATIC_WEB / "index.html").is_file():
+    if _api_only():
+        pass
+    elif not (STATIC_WEB / "index.html").is_file():
         print(
             "AtlasVPN (web): no se encontró la UI compilada.\n"
             f"  Esperado: {STATIC_WEB / 'index.html'}\n"
