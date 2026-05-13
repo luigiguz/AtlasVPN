@@ -12,6 +12,7 @@ on:
       - "Logos/**"
       - "requirements.txt"
       - "Dockerfile"
+      - "docker-entrypoint.sh"
       - "docker-compose.yml"
       - ".github/workflows/atlasvpn-selfhosted.yml"
   workflow_dispatch:

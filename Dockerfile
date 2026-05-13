@@ -38,7 +38,7 @@ ARG CLOUDFLARED_VERSION=2026.5.0
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Binario oficial cloudflared (amd64 / arm64)
@@ -62,14 +62,18 @@ COPY Logos/ ./Logos/
 
 COPY --from=ui /atlasvpn/static/web ./atlasvpn/static/web/
 
-RUN useradd --create-home --shell /bin/bash --uid 1000 atlas \
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh \
+    && useradd --create-home --shell /bin/bash --uid 1000 atlas \
     && chown -R atlas:atlas /app
 
-USER atlas
+# Arranque como root solo para chown de volúmenes; el proceso de la app baja a atlas (gosu).
+USER root
 
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:8765/" >/dev/null || exit 1
 
-ENTRYPOINT ["python", "-m", "atlasvpn", "--no-browser", "--host", "0.0.0.0", "--port", "8765"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["python", "-m", "atlasvpn", "--no-browser", "--host", "0.0.0.0", "--port", "8765"]
