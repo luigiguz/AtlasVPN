@@ -1,10 +1,4 @@
 # Compila la imagen en el runner self-hosted (Linux ARM64) y despliega con Docker Compose
-# en la misma máquina (p. ej. Raspberry Pi).
-#
-# runs-on solo usa ETIQUETAS (labels), no el nombre visible del runner en la UI.
-# Por defecto GitHub añade self-hosted + OS + arquitectura (p. ej. Linux + ARM64).
-# Si tienes varios runners y quieres uno concreto, añade una etiqueta custom al runner
-# (./config.sh --labels mi-etiqueta) y lista esa etiqueta aquí debajo.
 
 name: AtlasVPN — build y deploy (self-hosted)
 
