@@ -45,6 +45,13 @@ def main() -> None:
         metavar="N",
         help="Puerto del servidor local (default 8765)",
     )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        metavar="ADDR",
+        help="Host de escucha del servidor web (p. ej. 0.0.0.0 en contenedores Docker)",
+    )
     args = parser.parse_args()
     if args.tk:
         from atlasvpn.gui_main import run_app
@@ -53,15 +60,15 @@ def main() -> None:
     elif args.browser:
         from atlasvpn.web_server import run_web_server
 
-        run_web_server(open_browser=True, port=args.port)
+        run_web_server(host=args.host, open_browser=True, port=args.port)
     elif args.no_browser:
         from atlasvpn.web_server import run_web_server
 
-        run_web_server(open_browser=False, port=args.port)
+        run_web_server(host=args.host, open_browser=False, port=args.port)
     else:
         from atlasvpn.web_server import run_web_desktop
 
-        run_web_desktop(port=args.port)
+        run_web_desktop(host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

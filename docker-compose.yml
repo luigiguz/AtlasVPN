@@ -1,0 +1,44 @@
+# AtlasVPN en el mismo host donde compila el runner (p. ej. Raspberry Pi ARM64).
+# Requisitos: Docker Compose v2, `scripts/tunnels.json` (o créalo desde el ejemplo).
+#
+# Uso local en la RPi:
+#   cp -n scripts/tunnels.example.json scripts/tunnels.json   # solo la primera vez
+#   docker compose up -d --build
+#
+# Variables opcionales (export o fichero .env al lado de este archivo):
+#   ATLASVPN_IMAGE=atlasvpn
+#   ATLASVPN_TAG=latest
+#   ATLASVPN_PORT=8765
+#   CLOUDFLARED_VERSION=2026.5.0
+
+name: atlasvpn
+
+services:
+  atlasvpn:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CLOUDFLARED_VERSION: ${CLOUDFLARED_VERSION:-2026.5.0}
+    image: ${ATLASVPN_IMAGE:-atlasvpn}:${ATLASVPN_TAG:-latest}
+    container_name: atlasvpn
+    restart: unless-stopped
+    ports:
+      - "${ATLASVPN_PORT:-8765}:8765"
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - atlasvpn_settings:/app/.atlasvpn
+      - atlasvpn_cloudflared:/app/.cloudflared-tunnels
+      # Sitios y puertos locales (persistente en el host del checkout)
+      - ./scripts/tunnels.json:/app/scripts/tunnels.json:rw
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+volumes:
+  atlasvpn_settings:
+  atlasvpn_cloudflared:

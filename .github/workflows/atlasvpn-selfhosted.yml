@@ -1,0 +1,123 @@
+# Compila la imagen en el runner self-hosted (Linux ARM64) y despliega con Docker Compose
+# en la misma máquina (p. ej. Raspberry Pi con etiqueta VerkkuRunner).
+#
+# Etiquetas en el runner (ejemplo al registrar o con ./run.sh config):
+#   ./config.sh --labels VerkkuRunner
+# El runner debe tener: self-hosted, Linux, ARM64, VerkkuRunner
+# Si "VerkkuRunner" no está como etiqueta, quita esa línea de runs-on o añade la etiqueta al runner.
+
+name: AtlasVPN — build y deploy (self-hosted)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "atlasvpn/**"
+      - "ui/**"
+      - "scripts/**"
+      - "Logos/**"
+      - "requirements.txt"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - ".github/workflows/atlasvpn-selfhosted.yml"
+  workflow_dispatch:
+    inputs:
+      no_cache:
+        description: "docker compose build --no-cache"
+        required: false
+        default: "false"
+        type: boolean
+
+concurrency:
+  group: atlasvpn-selfhosted-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    name: Build + Compose (RPi)
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - VerkkuRunner
+
+    env:
+      COMPOSE_PROJECT_NAME: atlasvpn
+      DOCKER_BUILDKIT: "1"
+      ATLASVPN_IMAGE: atlasvpn
+      ATLASVPN_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Asegurar tunnels.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f scripts/tunnels.json ]]; then
+            echo "Creando scripts/tunnels.json desde plantilla (no estaba en el repo)."
+            cp scripts/tunnels.example.json scripts/tunnels.json
+          fi
+
+      - name: Docker y Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker compose version
+
+      - name: Build imagen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.no_cache }}" == "true" ]]; then
+            docker compose -f docker-compose.yml build --no-cache --pull
+          else
+            docker compose -f docker-compose.yml build --pull
+          fi
+
+      - name: Etiquetar también como latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker tag "${ATLASVPN_IMAGE}:${ATLASVPN_TAG}" "${ATLASVPN_IMAGE}:latest"
+
+      - name: Desplegar (Compose)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml up -d --remove-orphans
+
+      - name: Estado
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml images
+
+      - name: Comprobar HTTP (local)
+        shell: bash
+        env:
+          ATLASVPN_PORT: "8765"
+        run: |
+          set -euo pipefail
+          sleep 3
+          url="http://127.0.0.1:${ATLASVPN_PORT}/"
+          if command -v curl >/dev/null 2>&1; then
+            code="$(curl -fsS -o /dev/null -w "%{http_code}" "$url" || true)"
+            echo "HTTP $code"
+            [[ "$code" == "200" ]] || [[ "$code" == "302" ]] || [[ "$code" == "307" ]]
+          elif command -v wget >/dev/null 2>&1; then
+            wget -qO- "$url" >/dev/null
+          else
+            echo "Aviso: sin curl ni wget en el runner; omitiendo comprobación HTTP."
+          fi
+
+      - name: Logs del servicio (solo si falló antes)
+        if: failure()
+        shell: bash
+        run: docker compose -f docker-compose.yml logs --no-color --tail=80 atlasvpn || true
