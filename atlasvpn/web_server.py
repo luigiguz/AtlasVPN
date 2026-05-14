@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -23,7 +23,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from atlasvpn.cf_sync import CfSyncError, sync_to_tunnels_json
-from atlasvpn.constants import SSH_LOCAL_USER
+from atlasvpn.constants import resolve_ssh_username
 from atlasvpn.pgadmin_launch import launch_pgadmin
 from atlasvpn.poslite_urls import poslite_links_for_site
 from atlasvpn.paths import PACKAGE_DIR, PROJECT_ROOT, resolve_logo_path
@@ -37,6 +37,7 @@ from atlasvpn.web_auth import (
     resolve_user_dict,
     session_middleware_config,
 )
+from atlasvpn.ssh_terminal_ws import run_ssh_terminal_ws
 from atlasvpn.web_tokens import encode_access_token
 from atlasvpn.web_users import (
     audit,
@@ -214,6 +215,10 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.websocket("/api/ws/ssh-terminal")
+    async def ws_ssh_terminal(websocket: WebSocket) -> None:
+        await run_ssh_terminal_ws(websocket)
 
     @app.get("/api/logo")
     def logo() -> FileResponse:
@@ -406,7 +411,7 @@ def create_app() -> FastAPI:
             port = int(ssh["local_port"])
         except (TypeError, ValueError) as e:
             raise HTTPException(400, "Puerto inválido") from e
-        user = SSH_LOCAL_USER
+        user = resolve_ssh_username(ssh)
         try:
             if sys.platform == "win32":
                 wt = shutil.which("wt")

@@ -19,6 +19,7 @@ import {
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import { API_BASE, api, apiUrl, bearerHeaders, setAccessToken } from "./apiClient";
+import { WebSshSessionsDock, type SshWebSession } from "./WebSshSessionsDock";
 
 type SiteRow = {
   id: string;
@@ -464,6 +465,14 @@ export default function App() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(true);
   const [logs, setLogs] = useState<string[]>([]);
+  const [sshWebSessions, setSshWebSessions] = useState<SshWebSession[]>([]);
+  const [activeSshWebId, setActiveSshWebId] = useState<string | null>(null);
+
+  const openSshWebSession = useCallback((site: string) => {
+    const id = crypto.randomUUID();
+    setSshWebSessions((prev) => [...prev, { id, site, minimized: false }]);
+    setActiveSshWebId(id);
+  }, []);
   const logRef = useRef<HTMLPreElement>(null);
   const autoSyncStarted = useRef(false);
 
@@ -512,6 +521,8 @@ export default function App() {
       setMe(null);
       setAuthPhase("login");
       setTab("conn");
+      setSshWebSessions([]);
+      setActiveSshWebId(null);
     };
     window.addEventListener("atlasvpn-unauthorized", h);
     return () => window.removeEventListener("atlasvpn-unauthorized", h);
@@ -528,6 +539,8 @@ export default function App() {
     setMe(null);
     setAuthPhase("login");
     setTab("conn");
+    setSshWebSessions([]);
+    setActiveSshWebId(null);
   }, []);
 
   const loadSites = useCallback(async () => {
@@ -642,18 +655,6 @@ export default function App() {
       });
       appendLog(r.lines);
       await loadSites();
-    } catch (e) {
-      appendLog([String(e)]);
-    }
-  };
-
-  const doOpenSsh = async (site: string) => {
-    try {
-      const r = await api<{ command: string }>("/api/open-ssh-terminal", {
-        method: "POST",
-        body: JSON.stringify({ site }),
-      });
-      appendLog([`Terminal: ${r.command}`]);
     } catch (e) {
       appendLog([String(e)]);
     }
@@ -840,6 +841,14 @@ export default function App() {
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-cf-ink text-zinc-100 vpn-grid-bg">
+      {sshWebSessions.length > 0 ? (
+        <WebSshSessionsDock
+          sessions={sshWebSessions}
+          activeId={activeSshWebId}
+          setSessions={setSshWebSessions}
+          setActiveId={setActiveSshWebId}
+        />
+      ) : null}
       <div className="pointer-events-none absolute -left-32 top-20 h-72 w-72 rounded-full bg-cf-orange/25 blur-[100px] animate-float" />
       <div className="pointer-events-none absolute -right-20 bottom-32 h-80 w-80 rounded-full bg-sky-500/15 blur-[110px] animate-float [animation-delay:-6s]" />
 
@@ -1084,16 +1093,16 @@ export default function App() {
                                 ) : null}
                               </div>
                               <div className="flex flex-wrap gap-2">
-                                {s.ssh ? (
+                                {s.ssh && s.sshStatus === "active" ? (
                                   <motion.button
                                     type="button"
                                     whileHover={{ scale: 1.02 }}
                                     whileTap={{ scale: 0.98 }}
-                                    onClick={() => void doOpenSsh(s.id)}
+                                    onClick={() => openSshWebSession(s.id)}
                                     className="flex items-center gap-2 rounded-lg bg-cf-orange px-3 py-2 text-xs font-semibold text-black shadow-md sm:text-sm"
                                   >
                                     <Terminal className="h-4 w-4" />
-                                    Terminal SSH
+                                    Terminal web
                                   </motion.button>
                                 ) : null}
                                 {s.db ? (
@@ -1364,7 +1373,7 @@ export default function App() {
               },
               {
                 t: "Requisitos",
-                b: "cloudflared en PATH, login Access en el navegador cuando lo pida el túnel. El botón Terminal SSH usa el usuario admin@localhost.",
+                b: "cloudflared en PATH, login Access en el navegador cuando lo pida el túnel. «Terminal web» abre xterm en el navegador (WebSocket al API → SSH a 127.0.0.1 en el puerto del túnel); usuario SSH según tunnels.json (p. ej. admin@localhost).",
               },
             ].map((c, i) => (
               <motion.div

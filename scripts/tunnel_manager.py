@@ -188,7 +188,7 @@ def start_site_services(site: str, services: str, config_path: Path) -> tuple[bo
         lines.append("")
         lines.append("Conexión sugerida:")
         if want_ssh and ssh:
-            lines.append(f"  ssh <usuario>@localhost -p {ssh['local_port']}")
+            lines.append(f"  ssh <usuario>@localhost -p {ssh['local_port']} (usuario: ssh_user en tunnels.json o «admin»)")
         if want_db and db:
             lines.append(
                 f"  BD: host=127.0.0.1 port={db['local_port']} (cliente al puerto local)."

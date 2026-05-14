@@ -1,0 +1,341 @@
+"""WebSocket → proxy SSH interactivo hacia 127.0.0.1 (puerto del túnel en este host)."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import sys
+from typing import Any
+
+import asyncssh
+from asyncssh import SSHClient
+from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect, WebSocketState
+
+from atlasvpn.constants import resolve_ssh_username
+from atlasvpn.paths import SCRIPTS_DIR
+from atlasvpn.web_tokens import decode_access_token
+
+log = logging.getLogger(__name__)
+
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+import tunnel_manager as tm  # noqa: E402
+
+
+async def _safe_ws_close(websocket: WebSocket, *, code: int | None = None) -> None:
+    """Evita RuntimeError si el socket ya envió websocket.close (p. ej. tras error + finally)."""
+    with contextlib.suppress(RuntimeError, OSError):
+        if code is not None:
+            await websocket.close(code=code)
+        else:
+            await websocket.close()
+
+
+class _WsAuthLineReader:
+    """Durante el handshake SSH, lee líneas (contraseña / retos) desde mensajes binarios del WebSocket."""
+
+    def __init__(self, websocket: WebSocket) -> None:
+        self._ws = websocket
+        self._buf = bytearray()
+
+    async def _recv_payload(self) -> bytes:
+        while True:
+            msg = await self._ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                raise WebSocketDisconnect()
+            if msg["type"] != "websocket.receive":
+                continue
+            if "text" in msg and msg["text"]:
+                try:
+                    j = json.loads(msg["text"])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(j, dict) and j.get("type") == "resize":
+                    continue
+                continue
+            if "bytes" in msg and msg["bytes"]:
+                return msg["bytes"]
+
+    async def readline(self) -> str:
+        while True:
+            for sep in (b"\r\n", b"\n", b"\r"):
+                i = self._buf.find(sep)
+                if i >= 0:
+                    raw = self._buf[:i]
+                    del self._buf[: i + len(sep)]
+                    return raw.decode("utf-8", errors="replace")
+            self._buf.extend(await self._recv_payload())
+
+    def take_buffered_bytes(self) -> bytes:
+        b = bytes(self._buf)
+        self._buf.clear()
+        return b
+
+
+class _WebSshClient(SSHClient):
+    """Contraseña y keyboard-interactive leyendo del WebSocket; muestra prompts en la terminal."""
+
+    def __init__(self, reader: _WsAuthLineReader, websocket: WebSocket, ssh_login: str) -> None:
+        super().__init__()
+        self._reader = reader
+        self._ws = websocket
+        self._ssh_login = ssh_login
+
+    async def _emit_tty(self, text: str) -> None:
+        if self._ws.client_state != WebSocketState.CONNECTED:
+            return
+        with contextlib.suppress(OSError, RuntimeError):
+            await self._ws.send_bytes(text.encode("utf-8"))
+
+    def auth_banner_received(self, msg: str, lang: str) -> None:
+        if not (msg and msg.strip()):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        banner = "\r\n" + msg.rstrip("\n") + "\r\n"
+        loop.create_task(self._emit_tty(banner))
+
+    def kbdint_auth_requested(self) -> str:
+        return ""
+
+    async def password_auth_requested(self) -> str | None:
+        await self._emit_tty(f"\r\n{self._ssh_login}@127.0.0.1's password: ")
+        line = await self._reader.readline()
+        return line if line else None
+
+    async def kbdint_challenge_received(
+        self,
+        name: str,
+        instructions: str,
+        lang: str,
+        prompts: Any,
+    ) -> list[str] | None:
+        if instructions and str(instructions).strip():
+            await self._emit_tty("\r\n" + str(instructions).strip() + "\r\n")
+        if not prompts:
+            return []
+        out: list[str] = []
+        for item in prompts:
+            try:
+                prompt_text, _echo = item
+            except (TypeError, ValueError):
+                out.append(await self._reader.readline())
+                continue
+            if prompt_text:
+                await self._emit_tty(str(prompt_text))
+            else:
+                await self._emit_tty("\r\nPassword: ")
+            out.append(await self._reader.readline())
+        return out
+
+
+def _user_from_token(token: str | None) -> dict[str, Any] | None:
+    if not token or not token.strip():
+        return None
+    payload = decode_access_token(token.strip())
+    if not payload:
+        return None
+    role = str(payload.get("role") or "")
+    if role not in ("admin", "operator"):
+        return None
+    return {"username": str(payload.get("sub") or ""), "role": role}
+
+
+def _ssh_connect_error_message(exc: BaseException, ssh_user: str) -> str:
+    s = str(exc).lower()
+    if "permission denied" in s or "authentication failed" in s or "auth fail" in s:
+        return (
+            f"SSH no aceptó la autenticación para «{ssh_user}». "
+            "Comprueba la contraseña o la clave en el servidor; en tunnels.json puedes fijar "
+            '"ssh_user" (o "user") si el usuario no es «admin».'
+        )
+    return (
+        "No se pudo conectar por SSH a 127.0.0.1 en el puerto del túnel. "
+        "¿Está iniciado el túnel SSH para este sitio?"
+    )
+
+
+async def run_ssh_terminal_ws(websocket: WebSocket) -> None:
+    await websocket.accept()
+    token = websocket.query_params.get("token")
+    site = (websocket.query_params.get("site") or "").strip()
+    if not _user_from_token(token):
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "message": "No autorizado o sesión caducada."})
+            )
+        except OSError:
+            pass
+        await _safe_ws_close(websocket, code=1008)
+        return
+    if not site:
+        try:
+            await websocket.send_text(json.dumps({"type": "error", "message": "Falta el parámetro site."}))
+        except OSError:
+            pass
+        await _safe_ws_close(websocket, code=1008)
+        return
+
+    cfg = tm.load_config_optional(tm.default_config_path())
+    if not cfg:
+        try:
+            await websocket.send_text(json.dumps({"type": "error", "message": "Sin tunnels.json."}))
+        except OSError:
+            pass
+        await _safe_ws_close(websocket, code=1011)
+        return
+    entry = (cfg.get("sites") or {}).get(site) or {}
+    ssh = entry.get("ssh")
+    if not isinstance(ssh, dict) or ssh.get("local_port") in (None, ""):
+        try:
+            await websocket.send_text(
+                json.dumps({"type": "error", "message": "Sitio sin SSH en la configuración."})
+            )
+        except OSError:
+            pass
+        await _safe_ws_close(websocket, code=1011)
+        return
+    try:
+        port = int(ssh["local_port"])
+    except (TypeError, ValueError):
+        try:
+            await websocket.send_text(json.dumps({"type": "error", "message": "Puerto SSH inválido."}))
+        except OSError:
+            pass
+        await _safe_ws_close(websocket, code=1011)
+        return
+    if port < 1 or port > 65535:
+        try:
+            await websocket.send_text(json.dumps({"type": "error", "message": "Puerto SSH fuera de rango."}))
+        except OSError:
+            pass
+        await _safe_ws_close(websocket, code=1011)
+        return
+
+    user = resolve_ssh_username(ssh)
+    cols, rows = 120, 34
+    auth_reader = _WsAuthLineReader(websocket)
+
+    try:
+        try:
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "auth_hint",
+                        "message": "Autenticando SSH… Si el servidor pide contraseña, escríbela en la terminal y pulsa Enter.",
+                    }
+                )
+            )
+        except OSError:
+            pass
+
+        async with asyncssh.connect(
+            "127.0.0.1",
+            port=port,
+            username=user,
+            known_hosts=None,
+            client_keys=None,
+            client_factory=lambda: _WebSshClient(auth_reader, websocket, user),
+        ) as conn:
+            async with conn.create_process(
+                encoding=None,
+                term_type="xterm-256color",
+                term_size=(cols, rows),
+                stderr=asyncssh.STDOUT,
+            ) as process:
+                pending = auth_reader.take_buffered_bytes()
+                if pending and process.stdin is not None:
+                    process.stdin.write(pending)
+                    await process.stdin.drain()
+
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "ready",
+                            "site": site,
+                            "user": user,
+                            "port": port,
+                            "command": f"ssh {user}@localhost -p {port}",
+                        }
+                    )
+                )
+
+                out_task = asyncio.create_task(_pump_stdout_to_ws(websocket, process))
+
+                try:
+                    while websocket.client_state == WebSocketState.CONNECTED:
+                        msg = await websocket.receive()
+                        if msg["type"] == "websocket.disconnect":
+                            break
+                        if msg["type"] != "websocket.receive":
+                            continue
+                        if "bytes" in msg and msg["bytes"]:
+                            b = msg["bytes"]
+                            if process.stdin is not None:
+                                process.stdin.write(b)
+                                await process.stdin.drain()
+                        elif "text" in msg and msg["text"]:
+                            try:
+                                ctrl = json.loads(msg["text"])
+                            except json.JSONDecodeError:
+                                continue
+                            if ctrl.get("type") == "resize":
+                                try:
+                                    cols = int(ctrl.get("cols") or cols)
+                                    rows = int(ctrl.get("rows") or rows)
+                                except (TypeError, ValueError):
+                                    continue
+                                cols = max(40, min(cols, 500))
+                                rows = max(8, min(rows, 200))
+                                with contextlib.suppress(OSError, asyncssh.Error):
+                                    process.change_terminal_size(cols, rows)
+                except WebSocketDisconnect:
+                    pass
+                finally:
+                    out_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await out_task
+                    with contextlib.suppress(OSError, ProcessLookupError, asyncssh.Error):
+                        process.terminate()
+    except (OSError, asyncio.TimeoutError, asyncssh.Error) as e:
+        log.warning("ssh ws fallo site=%s port=%s user=%s: %s", site, port, user, e)
+        msg = _ssh_connect_error_message(e, user)
+        try:
+            await websocket.send_text(json.dumps({"type": "error", "message": msg}))
+        except OSError:
+            pass
+        await _safe_ws_close(websocket, code=1011)
+    finally:
+        await _safe_ws_close(websocket)
+
+
+async def _pump_stdout_to_ws(websocket: WebSocket, process: asyncssh.SSHClientProcess) -> None:
+    assert process.stdout is not None
+    try:
+        while True:
+            data = await process.stdout.read(32768)
+            if not data:
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "ssh_exit",
+                                    "message": "La sesión SSH terminó (shell cerrado o desconexión).",
+                                }
+                            )
+                        )
+                    except OSError:
+                        pass
+                await _safe_ws_close(websocket)
+                break
+            if websocket.client_state != WebSocketState.CONNECTED:
+                break
+            await websocket.send_bytes(data)
+    except (WebSocketDisconnect, OSError, RuntimeError) as ex:
+        log.debug("pump_stdout fin: %s", ex)

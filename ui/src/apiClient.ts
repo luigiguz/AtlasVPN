@@ -18,6 +18,21 @@ export function apiUrl(path: string): string {
   return API_BASE ? `${API_BASE}${p}` : p;
 }
 
+export function wsUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  if (API_BASE) {
+    const u = new URL(apiUrl(path));
+    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+    return u.toString();
+  }
+  if (typeof window !== "undefined") {
+    const loc = window.location;
+    const proto = loc.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${loc.host}${p}`;
+  }
+  return `ws://127.0.0.1:8765${p}`;
+}
+
 export function getAccessToken(): string | null {
   try {
     return sessionStorage.getItem(TOKEN_KEY);

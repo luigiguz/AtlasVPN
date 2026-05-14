@@ -37,7 +37,7 @@ disable-model-invocation: true
 ## UI web (`ui/`)
 
 - Stack actual: **React + Vite + Tailwind + framer-motion + lucide-react** (sin TanStack ni Axios en dependencias directas vigentes).
-- Despliegue Docker recomendado: **API** (`Dockerfile`) y **UI** (`Dockerfile.ui` + nginx); variable de build `VITE_API_BASE_URL` / `ATLASVPN_PUBLIC_API_URL` apunta al API público; CORS `ATLASVPN_CORS_ORIGINS` (incluye `https://atlas-vpn.verkku.com` por defecto); autenticación cruzada con **Bearer JWT** (`access_token` en login) además de cookie de sesión en mismo origen.
+- Despliegue Docker recomendado: **API** (`Dockerfile`) y **UI** (`Dockerfile.ui` + nginx); variable de build `VITE_API_BASE_URL` / `ATLASVPN_PUBLIC_API_URL` apunta al API público; CORS `ATLASVPN_CORS_ORIGINS` (incluye `https://atlas-vpn.verkku.com` por defecto); autenticación cruzada con **Bearer JWT** (`access_token` en login) además de cookie de sesión en mismo origen. **Terminal web**: WebSocket `/api/ws/ssh-terminal` (xterm); `ssh.ssh_user` opcional; la contraseña SSH se escribe en la terminal durante el handshake (como `ssh` en consola).
 - Mantener la UI **ligera**; no introducir ecosistemas pesados salvo acuerdo explícito del equipo.
 
 ## Cadena de suministro npm (política Verkku)

@@ -22,7 +22,7 @@ if str(_SCRIPTS) not in sys.path:
 import tunnel_manager as tm
 
 from atlasvpn import theme
-from atlasvpn.constants import SSH_LOCAL_USER
+from atlasvpn.constants import resolve_ssh_username
 from atlasvpn.cf_sync import CfSyncError, sync_to_tunnels_json
 from atlasvpn.pgadmin_launch import launch_pgadmin
 from atlasvpn.poslite_urls import poslite_links_for_site
@@ -847,7 +847,7 @@ class MainWindow(ctk.CTk):
         except (TypeError, ValueError):
             messagebox.showerror("AtlasVPN", "Puerto SSH inválido en tunnels.json.")
             return
-        user = SSH_LOCAL_USER
+        user = resolve_ssh_username(ssh)
         try:
             if sys.platform == "win32":
                 wt = shutil.which("wt")
