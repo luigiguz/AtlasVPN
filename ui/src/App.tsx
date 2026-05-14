@@ -1366,27 +1366,46 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-4"
           >
-            {[
-              {
-                t: "Qué es",
-                b: "Cliente para cloudflared access tcp hacia SSH y bases de datos detrás de Cloudflare Access. La sincronización rellena tunnels.json desde la API de Cloudflare.",
-              },
-              {
-                t: "Requisitos",
-                b: "cloudflared en PATH, login Access en el navegador cuando lo pida el túnel. «Terminal web» abre xterm en el navegador (WebSocket al API → SSH a 127.0.0.1 en el puerto del túnel); usuario SSH según tunnels.json (p. ej. admin@localhost).",
-              },
-            ].map((c, i) => (
-              <motion.div
-                key={c.t}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.08 }}
-                className="rounded-2xl border border-cf-line bg-cf-card/80 p-6 ring-1 ring-white/[0.03]"
-              >
-                <h3 className="font-semibold text-cf-orange">{c.t}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-zinc-400">{c.b}</p>
-              </motion.div>
-            ))}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.06 }}
+              className="rounded-2xl border border-cf-line bg-cf-card/80 p-6 ring-1 ring-white/[0.03]"
+            >
+              <h3 className="font-semibold text-cf-orange">Qué es</h3>
+              <div className="mt-3 space-y-3 text-sm leading-relaxed text-zinc-300">
+                <p>
+                  <span className="font-medium text-zinc-200">AtlasVPN</span> es una aplicación web destinada a la
+                  administración de accesos remotos hacia los sistemas de sus locales u oficinas. Ofrece un panel único
+                  en el navegador desde el que se consulta el estado de cada sitio, se inician o detienen los túneles
+                  cifrados cuando procede y se accede, cuando el túnel está activo, a utilidades como la terminal por
+                  SSH o la conexión a base de datos, sin que el operador deba editar a mano archivos de configuración
+                  en cada sesión de trabajo.
+                </p>
+                <p>
+                  La herramienta se integra con la infraestructura habitual basada en{" "}
+                  <span className="text-zinc-200">Cloudflare Access</span> y en el cliente{" "}
+                  <span className="text-zinc-200">cloudflared</span>: la función de sincronización obtiene desde la API
+                  de Cloudflare la relación de sitios y túneles autorizados y vuelca esa información en la
+                  configuración local, de modo que lo definido en la nube y lo mostrado en la aplicación permanezcan
+                  alineados.
+                </p>
+                <p>
+                  En conjunto, el objetivo es reducir incidencias por desajustes de configuración, acortar los tiempos
+                  de soporte a tienda y dejar constancia clara del estado operativo de cada conexión en un solo lugar.
+                </p>
+              </div>
+              <div className="mt-8 border-t border-cf-line/70 pt-6">
+                <p className="text-center text-[10px] font-semibold uppercase tracking-[0.32em] text-zinc-500">
+                  Desarrollo
+                </p>
+                <p className="mt-3 text-center text-xl font-bold tracking-tight text-zinc-100 sm:text-2xl">
+                  <span className="bg-gradient-to-r from-amber-100 via-cf-orange to-amber-100 bg-clip-text text-transparent drop-shadow-[0_0_24px_rgba(249,115,22,0.25)]">
+                    Luis Guzman
+                  </span>
+                </p>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </main>
