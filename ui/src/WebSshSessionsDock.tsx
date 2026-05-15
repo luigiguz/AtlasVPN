@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { motion } from "framer-motion";
 import {
   ChevronsUp,
@@ -451,6 +451,7 @@ function SshSessionPane({
       if (!ws) return;
       const m = ev.data as { t?: string; d?: string; cols?: number; rows?: number } | null;
       if (!m || typeof m !== "object") return;
+      if (m.t === "relay-ready") return;
       if (m.t === "mirror-bye") {
         onRelayMirrorClosedRef.current?.();
         return;
@@ -471,13 +472,25 @@ function SshSessionPane({
     const step = () => {
       if (cancelled) return;
       const ws = wsRef.current;
-      if (!ws || ws.readyState === WebSocket.CONNECTING) {
+      if (!ws) {
         raf = requestAnimationFrame(step);
+        return;
+      }
+      if (ws.readyState === WebSocket.CONNECTING) {
+        raf = requestAnimationFrame(step);
+        return;
+      }
+      if (ws.readyState !== WebSocket.OPEN) {
         return;
       }
       bc = new BroadcastChannel(sshRelayChannelName(sessionId));
       relayBcRef.current = bc;
       bc.addEventListener("message", onBc);
+      try {
+        bc.postMessage({ t: "relay-ready" });
+      } catch {
+        /* ignore */
+      }
     };
     raf = requestAnimationFrame(step);
 
@@ -664,6 +677,10 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
   const [banner, setBanner] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; canCopy: boolean } | null>(null);
 
+  useEffect(() => {
+    setBanner("Conectando con el panel principal…");
+  }, [dockSessionId]);
+
   const notifyMirrorBye = useCallback(() => {
     try {
       const ch = new BroadcastChannel(sshRelayChannelName(dockSessionId));
@@ -674,10 +691,13 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
     }
   }, [dockSessionId]);
 
+  /* No enviar mirror-bye en cleanup de React: StrictMode desmonta dos veces y rompe el relay en el padre. */
   useEffect(() => {
-    return () => {
+    const onHide = () => {
       notifyMirrorBye();
     };
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
   }, [notifyMirrorBye]);
 
   useEffect(() => {
@@ -787,6 +807,10 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
         command?: string;
       } | null;
       if (!m || typeof m !== "object") return;
+      if (m.t === "relay-ready") {
+        setBanner(null);
+        return;
+      }
       if (m.t === "out" && m.buf instanceof ArrayBuffer) {
         term.write(dec.decode(new Uint8Array(m.buf)));
         term.scrollToBottom();
@@ -1196,14 +1220,19 @@ export function WebSshSessionsDock({
       const top = Math.max(0, Math.round((window.screen.availHeight - h) / 2));
       /* Sin noopener: la emergente conserva `window.opener` para reintegrar al dock vía postMessage. */
       const feat = `width=${w},height=${h},left=${left},top=${top}`;
+      /* Primero `poppedOut`: el popout debe montar el espejo cuando el padre ya escucha BroadcastChannel. */
+      flushSync(() => {
+        setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, poppedOut: true } : s)));
+      });
       const win = window.open(url, `atlasvpn-ssh-${sess.id}`, feat);
       if (!win) {
+        flushSync(() => {
+          setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, poppedOut: false } : s)));
+        });
         window.alert(
           "El navegador bloqueó la ventana emergente. Permite ventanas para este origen e inténtalo de nuevo.",
         );
-        return;
       }
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, poppedOut: true } : s)));
     },
     [sessions, setSessions],
   );
