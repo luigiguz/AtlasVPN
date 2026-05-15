@@ -4,14 +4,22 @@ import "@xterm/xterm/css/xterm.css";
 import { createPortal, flushSync } from "react-dom";
 import { motion } from "framer-motion";
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronsUp,
+  Cpu,
   Copy,
   ExternalLink,
   GripHorizontal,
   GripVertical,
+  HardDrive,
+  MemoryStick,
   Minus,
+  Monitor,
   PanelBottomOpen,
+  Server,
   Terminal as TerminalIcon,
+  User,
   X,
 } from "lucide-react";
 import {
@@ -61,6 +69,146 @@ export function buildSshWebPopoutUrl(site: string, dockSessionId?: string | null
 
 export function sshRelayChannelName(sessionId: string): string {
   return `atlasvpn-ssh-relay-${sessionId}`;
+}
+
+export type SshHostDiskStat = { mount: string; pct: number };
+
+/** Métricas del host remoto (Linux) enviadas por el WebSocket; `net_*` aparece tras el segundo muestreo. */
+export type SshHostStatsPayload = {
+  hostname?: string;
+  cpu_pct?: number;
+  load1?: number;
+  mem_total_kb?: number | null;
+  mem_avail_kb?: number | null;
+  uptime_text?: string;
+  user?: string;
+  disks?: SshHostDiskStat[];
+  net_down_mbps?: number;
+  net_up_mbps?: number;
+};
+
+function SshHostStatusBar({
+  stats,
+  siteFallback,
+}: {
+  stats: SshHostStatsPayload | null;
+  siteFallback: string;
+}): ReactElement | null {
+  const histRef = useRef<number[]>([]);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const c = stats?.cpu_pct;
+    if (typeof c === "number" && !Number.isNaN(c)) {
+      histRef.current = [...histRef.current.slice(-19), c];
+      tick((x) => x + 1);
+    }
+  }, [stats?.cpu_pct]);
+
+  if (!stats) return null;
+
+  const n0 = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 });
+  const n2 = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const host = (stats.hostname || siteFallback || "").trim() || siteFallback;
+  const cpu = typeof stats.cpu_pct === "number" && !Number.isNaN(stats.cpu_pct) ? stats.cpu_pct : null;
+  const cpuColor =
+    cpu == null ? "text-zinc-400" : cpu >= 85 ? "text-red-400" : cpu >= 55 ? "text-amber-300" : "text-emerald-400";
+
+  let memLine: string | null = null;
+  const mtk = stats.mem_total_kb;
+  const mak = stats.mem_avail_kb;
+  if (typeof mtk === "number" && mtk > 0 && typeof mak === "number" && mak >= 0) {
+    const usedGb = (mtk - mak) / (1024 * 1024);
+    const totGb = mtk / (1024 * 1024);
+    memLine = `${n2.format(usedGb)} GB / ${n2.format(totGb)} GB`;
+  }
+
+  const up = stats.net_up_mbps;
+  const dn = stats.net_down_mbps;
+  const upStr = typeof up === "number" && !Number.isNaN(up) ? `${n2.format(up)} Mb/s` : "—";
+  const dnStr = typeof dn === "number" && !Number.isNaN(dn) ? `${n2.format(dn)} Mb/s` : "—";
+
+  const upTime = (stats.uptime_text || "").trim();
+  const user = (stats.user || "").trim();
+
+  const disks = Array.isArray(stats.disks) ? stats.disks : [];
+  const diskStr =
+    disks.length > 0
+      ? disks.map((d) => `${d.mount}: ${n0.format(d.pct)}%`).join(" · ")
+      : null;
+
+  const hist = histRef.current;
+  const sparkW = 44;
+  const sparkH = 12;
+  let sparkPts = "";
+  if (hist.length >= 2) {
+    const n = hist.length;
+    sparkPts = hist
+      .map((v, i) => {
+        const x = (i / (n - 1)) * sparkW;
+        const y = sparkH - (Math.max(0, Math.min(100, v)) / 100) * sparkH;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+  }
+
+  const sep = <span className="text-zinc-600" aria-hidden>|</span>;
+
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-zinc-800 bg-zinc-950/95 px-2 py-1 font-mono text-[10px] text-zinc-300"
+      title="Métricas del servidor Linux (vía SSH, cada pocos segundos)"
+    >
+      <span className="inline-flex items-center gap-1 text-zinc-200">
+        <Server className="h-3 w-3 shrink-0 text-red-500" aria-hidden />
+        <span className="truncate max-w-[10rem]">{host}</span>
+      </span>
+      {sep}
+      <span className="inline-flex items-center gap-1">
+        <Cpu className="h-3 w-3 shrink-0 text-emerald-500" aria-hidden />
+        <span className={cpuColor}>{cpu != null ? `${n0.format(cpu)}%` : "—"}</span>
+        {sparkPts ? (
+          <svg width={sparkW} height={sparkH} className="shrink-0 text-emerald-500/80" aria-hidden>
+            <polyline
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1"
+              points={sparkPts}
+            />
+          </svg>
+        ) : null}
+      </span>
+      {sep}
+      <span className="inline-flex items-center gap-1 text-amber-300/95">
+        <MemoryStick className="h-3 w-3 shrink-0 text-emerald-500" aria-hidden />
+        {memLine ?? "—"}
+      </span>
+      {sep}
+      <span className="inline-flex items-center gap-1 text-cyan-300/90">
+        <ArrowUp className="h-3 w-3 shrink-0" aria-hidden />
+        {upStr}
+      </span>
+      {sep}
+      <span className="inline-flex items-center gap-1 text-blue-300/90">
+        <ArrowDown className="h-3 w-3 shrink-0" aria-hidden />
+        {dnStr}
+      </span>
+      {sep}
+      <span className="inline-flex items-center gap-1 text-zinc-400">
+        <Monitor className="h-3 w-3 shrink-0 text-zinc-500" aria-hidden />
+        {upTime || "—"}
+      </span>
+      {sep}
+      <span className="inline-flex items-center gap-1 text-zinc-400">
+        <User className="h-3 w-3 shrink-0 text-zinc-500" aria-hidden />
+        {user || "—"}
+      </span>
+      {sep}
+      <span className="inline-flex min-w-0 items-center gap-1 text-zinc-400">
+        <HardDrive className="h-3 w-3 shrink-0 text-zinc-500" aria-hidden />
+        <span className="truncate">{diskStr ?? "—"}</span>
+      </span>
+    </div>
+  );
 }
 
 /** `postMessage` desde la ventana emergente hacia `window.opener` para reintegrar el terminal en el dock. */
@@ -122,6 +270,7 @@ function SshSessionPane({
   const [cmd, setCmd] = useState<string | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [hostStats, setHostStats] = useState<SshHostStatsPayload | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; canCopy: boolean } | null>(null);
   const sshEndedRef = useRef(false);
   const onSshEndRef = useRef(onSshSessionEnd);
@@ -253,6 +402,7 @@ function SshSessionPane({
     };
 
     sshEndedRef.current = false;
+    setHostStats(null);
 
     term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
       if (ev.type !== "keydown") return true;
@@ -381,6 +531,17 @@ function SshSessionPane({
               relayBcRef.current?.postMessage({ t: "cmd", command: j.command });
             } catch {
               /* ignore */
+            }
+          }
+          if (j.type === "host_stats") {
+            const st = (j as { stats?: unknown }).stats;
+            if (st && typeof st === "object") {
+              setHostStats(st as SshHostStatsPayload);
+              try {
+                relayBcRef.current?.postMessage({ t: "host_stats", stats: st });
+              } catch {
+                /* ignore */
+              }
             }
           }
         } catch {
@@ -585,7 +746,7 @@ function SshSessionPane({
       {banner && !fatal ? (
         <div className="shrink-0 border-b border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">{banner}</div>
       ) : null}
-      <div className="relative min-h-0 flex-1 overflow-hidden p-1">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden p-1">
         {fatal ? (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-[#0a0a0b]/95 px-3">
             <p className="max-w-sm text-center text-sm text-rose-100">{fatal}</p>
@@ -598,7 +759,8 @@ function SshSessionPane({
             </button>
           </div>
         ) : null}
-        <div ref={wrapRef} className="h-full min-h-[200px] w-full" />
+        <div ref={wrapRef} className="min-h-0 flex-1 overflow-hidden" />
+        {!fatal ? <SshHostStatusBar stats={hostStats} siteFallback={site} /> : null}
       </div>
       {!fatal ? (
         <p className="shrink-0 border-t border-zinc-800 px-2 py-1 text-[10px] leading-snug text-zinc-500">
@@ -677,6 +839,7 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
   const [cmd, setCmd] = useState<string | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [hostStats, setHostStats] = useState<SshHostStatsPayload | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; canCopy: boolean } | null>(null);
 
   useEffect(() => {
@@ -807,6 +970,7 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
         buf?: ArrayBuffer;
         message?: string;
         command?: string;
+        stats?: unknown;
       } | null;
       if (!m || typeof m !== "object") return;
       if (m.t === "relay-ready") {
@@ -816,6 +980,10 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
       if (m.t === "out" && m.buf instanceof ArrayBuffer) {
         term.write(dec.decode(new Uint8Array(m.buf)));
         term.scrollToBottom();
+        return;
+      }
+      if (m.t === "host_stats" && m.stats && typeof m.stats === "object") {
+        setHostStats(m.stats as SshHostStatsPayload);
         return;
       }
       if (m.t === "cmd" && typeof m.command === "string") setCmd(m.command);
@@ -966,7 +1134,7 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
       {banner && !fatal ? (
         <div className="shrink-0 border-b border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">{banner}</div>
       ) : null}
-      <div className="relative min-h-0 flex-1 overflow-hidden p-1">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden p-1">
         {fatal ? (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-[#0a0a0b]/95 px-3">
             <p className="max-w-sm text-center text-sm text-rose-100">{fatal}</p>
@@ -979,7 +1147,8 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
             </button>
           </div>
         ) : null}
-        <div ref={wrapRef} className="h-full min-h-[200px] w-full" />
+        <div ref={wrapRef} className="min-h-0 flex-1 overflow-hidden" />
+        {!fatal ? <SshHostStatusBar stats={hostStats} siteFallback={site} /> : null}
       </div>
       {!fatal ? (
         <p className="shrink-0 border-t border-zinc-800 px-2 py-1 text-[10px] leading-snug text-zinc-500">

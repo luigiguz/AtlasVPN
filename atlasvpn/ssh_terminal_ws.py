@@ -7,6 +7,8 @@ import contextlib
 import json
 import logging
 import sys
+import time
+from pathlib import Path
 from typing import Any
 
 import asyncssh
@@ -19,6 +21,17 @@ from atlasvpn.paths import SCRIPTS_DIR
 from atlasvpn.web_tokens import decode_access_token
 
 log = logging.getLogger(__name__)
+
+
+def _ssh_stats_payload_body() -> str:
+    try:
+        return (Path(__file__).resolve().parent / "ssh_remote_stats_payload.py").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+_SSH_STATS_BODY = _ssh_stats_payload_body()
+
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -265,6 +278,7 @@ async def run_ssh_terminal_ws(websocket: WebSocket) -> None:
                     )
                 )
 
+                stats_task = asyncio.create_task(_host_stats_pump(conn, websocket))
                 out_task = asyncio.create_task(_pump_stdout_to_ws(websocket, process))
 
                 try:
@@ -297,6 +311,9 @@ async def run_ssh_terminal_ws(websocket: WebSocket) -> None:
                 except WebSocketDisconnect:
                     pass
                 finally:
+                    stats_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await stats_task
                     out_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await out_task
@@ -312,6 +329,78 @@ async def run_ssh_terminal_ws(websocket: WebSocket) -> None:
         await _safe_ws_close(websocket, code=1011)
     finally:
         await _safe_ws_close(websocket)
+
+
+async def _host_stats_pump(conn: asyncssh.SSHClientConnection, websocket: WebSocket) -> None:
+    """Ejecuta en el host remoto un script corto (Linux) y envía JSON por el WebSocket sin mezclarlo con el PTY."""
+    body = _SSH_STATS_BODY.strip()
+    if not body:
+        return
+    last_rx: int | None = None
+    last_tx: int | None = None
+    last_t: float | None = None
+    try:
+        while websocket.client_state == WebSocketState.CONNECTED:
+            await asyncio.sleep(3.0)
+            if websocket.client_state != WebSocketState.CONNECTED:
+                break
+            now = time.monotonic()
+            try:
+                proc = await asyncio.wait_for(
+                    conn.run(
+                        "python3",
+                        "-u",
+                        "-",
+                        input=body,
+                        encoding="utf-8",
+                        check=False,
+                    ),
+                    timeout=22.0,
+                )
+            except (asyncio.TimeoutError, OSError, asyncssh.Error, ConnectionError) as e:
+                log.debug("host_stats omit: %s", e)
+                continue
+            if proc.returncode != 0:
+                continue
+            raw = (proc.stdout or "").strip()
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw.splitlines()[-1])
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            rx = data.get("rx_bytes")
+            tx = data.get("tx_bytes")
+            down_mbps: float | None = None
+            up_mbps: float | None = None
+            if (
+                isinstance(rx, int)
+                and isinstance(tx, int)
+                and last_rx is not None
+                and last_tx is not None
+                and last_t is not None
+            ):
+                dt = max(1e-3, now - last_t)
+                drx = max(0, rx - last_rx)
+                dtx = max(0, tx - last_tx)
+                down_mbps = (drx * 8.0 / 1e6) / dt
+                up_mbps = (dtx * 8.0 / 1e6) / dt
+            if isinstance(rx, int) and isinstance(tx, int):
+                last_rx, last_tx, last_t = rx, tx, now
+            data.pop("rx_bytes", None)
+            data.pop("tx_bytes", None)
+            if down_mbps is not None:
+                data["net_down_mbps"] = round(down_mbps, 2)
+            if up_mbps is not None:
+                data["net_up_mbps"] = round(up_mbps, 2)
+            if websocket.client_state != WebSocketState.CONNECTED:
+                break
+            with contextlib.suppress(OSError, RuntimeError):
+                await websocket.send_text(json.dumps({"type": "host_stats", "stats": data}, ensure_ascii=False))
+    except asyncio.CancelledError:
+        raise
 
 
 async def _pump_stdout_to_ws(websocket: WebSocket, process: asyncssh.SSHClientProcess) -> None:
