@@ -12,6 +12,19 @@ export const API_BASE = resolveApiBase();
 
 const TOKEN_KEY = "atlasvpn_access_token";
 
+/** sessionStorage no se comparte entre ventanas emergentes; localStorage sí (mismo origen). */
+function migrateAccessTokenFromSessionStorage(): void {
+  try {
+    const legacy = sessionStorage.getItem(TOKEN_KEY);
+    if (legacy) {
+      localStorage.setItem(TOKEN_KEY, legacy);
+      sessionStorage.removeItem(TOKEN_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function apiUrl(path: string): string {
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
   const p = path.startsWith("/") ? path : `/${path}`;
@@ -34,8 +47,9 @@ export function wsUrl(path: string): string {
 }
 
 export function getAccessToken(): string | null {
+  migrateAccessTokenFromSessionStorage();
   try {
-    return sessionStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(TOKEN_KEY);
   } catch {
     return null;
   }
@@ -43,8 +57,13 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null): void {
   try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token);
-    else sessionStorage.removeItem(TOKEN_KEY);
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+      sessionStorage.removeItem(TOKEN_KEY);
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem(TOKEN_KEY);
+    }
   } catch {
     /* ignore */
   }

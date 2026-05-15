@@ -28,26 +28,39 @@ import {
 
 import { getAccessToken, wsUrl } from "./apiClient";
 
-export type SshWebSession = { id: string; site: string; minimized: boolean };
+export type SshWebSession = { id: string; site: string; minimized: boolean; poppedOut?: boolean };
 
-/** Query de ventana emergente: `?sshPopout=1&site=<idSitio>` (mismo origen que la app). */
-export function parseSshWebPopoutSite(search: string): string | null {
+export type SshWebPopoutParams = { site: string; dockSessionId: string | null };
+
+/** Popout con `dockSession` = espejo del terminal del dock (misma sesión SSH). Sin él = terminal propio en la ventana. */
+export function parseSshWebPopoutParams(search: string): SshWebPopoutParams | null {
   try {
     const q = search.startsWith("?") ? search.slice(1) : search;
     const p = new URLSearchParams(q);
     if (p.get("sshPopout") !== "1") return null;
     const site = p.get("site")?.trim();
-    return site || null;
+    if (!site) return null;
+    const dockSessionId = p.get("dockSession")?.trim() || null;
+    return { site, dockSessionId };
   } catch {
     return null;
   }
 }
 
-export function buildSshWebPopoutUrl(site: string): string {
+export function parseSshWebPopoutSite(search: string): string | null {
+  return parseSshWebPopoutParams(search)?.site ?? null;
+}
+
+export function buildSshWebPopoutUrl(site: string, dockSessionId?: string | null): string {
   const u = new URL(window.location.origin + window.location.pathname);
   u.searchParams.set("sshPopout", "1");
   u.searchParams.set("site", site);
+  if (dockSessionId) u.searchParams.set("dockSession", dockSessionId);
   return u.href;
+}
+
+export function sshRelayChannelName(sessionId: string): string {
+  return `atlasvpn-ssh-relay-${sessionId}`;
 }
 
 /** `postMessage` desde la ventana emergente hacia `window.opener` para reintegrar el terminal en el dock. */
@@ -56,6 +69,8 @@ export const SSH_WEB_REATTACH_MESSAGE_TYPE = "atlasvpn-ssh-reattach" as const;
 export type SshWebReattachPayload = {
   type: typeof SSH_WEB_REATTACH_MESSAGE_TYPE;
   site: string;
+  /** Si viene del espejo relay, reabre la pestaña en el dock sin nuevo WebSocket. */
+  dockSessionId?: string;
 };
 
 type DockProps = {
@@ -74,8 +89,12 @@ type PaneProps = {
   onSshSessionEnd?: () => void;
   /** En ventana emergente se oculta minimizar y se adaptan textos. */
   chrome?: "dock" | "popout";
-  /** Solo `chrome === "popout"`: vuelve a abrir la sesión en el dock de la ventana principal. */
+  /** Solo `chrome === "popout"`: vuelve a integrar en el dock de la ventana principal. */
   onReattachToDock?: () => void;
+  /** La sesión SSH vive en otra ventana; este panel solo refleja I/O por BroadcastChannel. */
+  relayPoppedOut?: boolean;
+  /** El espejo en la ventana emergente se cerró sin reintegrar: vuelve a mostrar la pestaña en el dock. */
+  onRelayMirrorClosed?: () => void;
 };
 
 function SshSessionPane({
@@ -87,13 +106,16 @@ function SshSessionPane({
   onSshSessionEnd,
   chrome = "dock",
   onReattachToDock,
+  relayPoppedOut = false,
+  onRelayMirrorClosed,
 }: PaneProps): ReactElement {
   const wrapRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const relayBcRef = useRef<BroadcastChannel | null>(null);
   const visibleRef = useRef(visible);
-  visibleRef.current = visible;
+  visibleRef.current = visible || relayPoppedOut;
 
   const [cmd, setCmd] = useState<string | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
@@ -102,8 +124,11 @@ function SshSessionPane({
   const sshEndedRef = useRef(false);
   const onSshEndRef = useRef(onSshSessionEnd);
   onSshEndRef.current = onSshSessionEnd;
+  const onRelayMirrorClosedRef = useRef(onRelayMirrorClosed);
+  onRelayMirrorClosedRef.current = onRelayMirrorClosed;
 
   const refit = useCallback(() => {
+    if (relayPoppedOut) return;
     const t = termRef.current;
     const fit = fitRef.current;
     const el = wrapRef.current;
@@ -117,10 +142,10 @@ function SshSessionPane({
     } catch {
       /* layout aún sin medidas */
     }
-  }, []);
+  }, [relayPoppedOut]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || relayPoppedOut) return;
     const id = requestAnimationFrame(() => {
       refit();
       termRef.current?.scrollToBottom();
@@ -322,20 +347,57 @@ function SshSessionPane({
           if (j.type === "ssh_exit") {
             sshEndedRef.current = true;
             setCtxMenu(null);
+            try {
+              relayBcRef.current?.postMessage({ t: "exit" });
+            } catch {
+              /* ignore */
+            }
             onSshEndRef.current?.();
             return;
           }
-          if (j.type === "error") setFatal(j.message || "Error del servidor");
-          if (j.type === "auth_hint" && j.message) setBanner(j.message);
-          if (j.type === "ready" && j.command) setCmd(j.command);
+          if (j.type === "error") {
+            const msg = j.message || "Error del servidor";
+            setFatal(msg);
+            try {
+              relayBcRef.current?.postMessage({ t: "fatal", message: msg });
+            } catch {
+              /* ignore */
+            }
+            return;
+          }
+          if (j.type === "auth_hint" && j.message) {
+            setBanner(j.message);
+            try {
+              relayBcRef.current?.postMessage({ t: "auth_hint", message: j.message });
+            } catch {
+              /* ignore */
+            }
+          }
+          if (j.type === "ready" && j.command) {
+            setCmd(j.command);
+            try {
+              relayBcRef.current?.postMessage({ t: "cmd", command: j.command });
+            } catch {
+              /* ignore */
+            }
+          }
         } catch {
           /* ignore */
         }
         return;
       }
       if (ev.data instanceof ArrayBuffer) {
-        term.write(dec.decode(new Uint8Array(ev.data)));
+        const txt = dec.decode(new Uint8Array(ev.data));
+        term.write(txt);
         scrollBottom();
+        try {
+          const ch = relayBcRef.current;
+          if (ch && ev.data.byteLength > 0) {
+            ch.postMessage({ t: "out", buf: ev.data.slice(0) });
+          }
+        } catch {
+          /* ignore */
+        }
       }
     };
 
@@ -369,8 +431,74 @@ function SshSessionPane({
   }, [site, sessionId, refit]);
 
   useEffect(() => {
-    if (visible) termRef.current?.focus();
-  }, [visible]);
+    if (!relayPoppedOut) {
+      try {
+        relayBcRef.current?.close();
+      } catch {
+        /* ignore */
+      }
+      relayBcRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    let raf = 0;
+    let bc: BroadcastChannel | null = null;
+    const encRelay = new TextEncoder();
+
+    const onBc = (ev: MessageEvent) => {
+      const ws = wsRef.current;
+      if (!ws) return;
+      const m = ev.data as { t?: string; d?: string; cols?: number; rows?: number } | null;
+      if (!m || typeof m !== "object") return;
+      if (m.t === "mirror-bye") {
+        onRelayMirrorClosedRef.current?.();
+        return;
+      }
+      if (m.t === "in" && typeof m.d === "string" && ws.readyState === WebSocket.OPEN) {
+        ws.send(encRelay.encode(m.d));
+      }
+      if (
+        m.t === "resize" &&
+        typeof m.cols === "number" &&
+        typeof m.rows === "number" &&
+        ws.readyState === WebSocket.OPEN
+      ) {
+        ws.send(JSON.stringify({ type: "resize", cols: m.cols, rows: m.rows }));
+      }
+    };
+
+    const step = () => {
+      if (cancelled) return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState === WebSocket.CONNECTING) {
+        raf = requestAnimationFrame(step);
+        return;
+      }
+      bc = new BroadcastChannel(sshRelayChannelName(sessionId));
+      relayBcRef.current = bc;
+      bc.addEventListener("message", onBc);
+    };
+    raf = requestAnimationFrame(step);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      if (bc) {
+        bc.removeEventListener("message", onBc);
+        try {
+          bc.close();
+        } catch {
+          /* ignore */
+        }
+      }
+      if (relayBcRef.current === bc) relayBcRef.current = null;
+    };
+  }, [relayPoppedOut, sessionId]);
+
+  useEffect(() => {
+    if (visible && !relayPoppedOut) termRef.current?.focus();
+  }, [visible, relayPoppedOut]);
 
   const copyCmd = async () => {
     if (!cmd || !navigator.clipboard?.writeText) return;
@@ -384,8 +512,8 @@ function SshSessionPane({
 
   return (
     <div
-      className={`flex min-h-0 flex-1 flex-col overflow-hidden ${visible ? "flex" : "hidden"}`}
-      aria-hidden={!visible}
+      className={`flex min-h-0 flex-1 flex-col overflow-hidden ${visible || relayPoppedOut ? "flex" : "hidden"}`}
+      aria-hidden={!visible && !relayPoppedOut}
     >
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-800 px-2 py-1.5">
         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -519,9 +647,375 @@ function SshSessionPane({
   );
 }
 
+type RelayMirrorProps = {
+  site: string;
+  dockSessionId: string;
+  onReattachToDock: () => void;
+};
+
+/** Terminal en ventana emergente conectado al mismo WebSocket que el dock vía BroadcastChannel. */
+export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: RelayMirrorProps): ReactElement {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const bcRef = useRef<BroadcastChannel | null>(null);
+  const [cmd, setCmd] = useState<string | null>(null);
+  const [fatal, setFatal] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; canCopy: boolean } | null>(null);
+
+  const notifyMirrorBye = useCallback(() => {
+    try {
+      const ch = new BroadcastChannel(sshRelayChannelName(dockSessionId));
+      ch.postMessage({ t: "mirror-bye" });
+      ch.close();
+    } catch {
+      /* ignore */
+    }
+  }, [dockSessionId]);
+
+  useEffect(() => {
+    return () => {
+      notifyMirrorBye();
+    };
+  }, [notifyMirrorBye]);
+
+  useEffect(() => {
+    const bc = new BroadcastChannel(sshRelayChannelName(dockSessionId));
+    bcRef.current = bc;
+    const dec = new TextDecoder("utf-8", { fatal: false });
+
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      scrollback: 50_000,
+      windowsMode: true,
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      theme: {
+        background: "#0a0a0b",
+        foreground: "#e4e4e7",
+        cursor: "#fafafa",
+        black: "#18181b",
+        brightBlack: "#52525b",
+        red: "#f87171",
+        green: "#4ade80",
+        yellow: "#facc15",
+        blue: "#60a5fa",
+        magenta: "#c084fc",
+        cyan: "#22d3ee",
+        white: "#fafafa",
+        brightRed: "#fca5a5",
+        brightGreen: "#86efac",
+        brightYellow: "#fde047",
+        brightBlue: "#93c5fd",
+        brightMagenta: "#d8b4fe",
+        brightCyan: "#67e8f9",
+        brightWhite: "#ffffff",
+      },
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    termRef.current = term;
+    fitRef.current = fit;
+
+    const el = wrapRef.current;
+    if (!el) {
+      term.dispose();
+      bc.close();
+      return;
+    }
+    term.open(el);
+    const termEl = term.element;
+    if (!termEl) {
+      term.dispose();
+      bc.close();
+      return;
+    }
+
+    term.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
+      if (ev.type !== "keydown") return true;
+      const mod = ev.ctrlKey || ev.metaKey;
+      const key = ev.key;
+      if (mod && (key === "c" || key === "C")) {
+        if (term.hasSelection()) {
+          const sel = term.getSelection();
+          if (sel) void navigator.clipboard.writeText(sel).then(() => setBanner("Selección copiada."));
+          return false;
+        }
+        return true;
+      }
+      if (mod && (key === "v" || key === "V")) {
+        void navigator.clipboard.readText().then((text) => {
+          if (text) {
+            try {
+              bc.postMessage({ t: "in", d: text });
+            } catch {
+              setBanner("No se pudo enviar pegado.");
+            }
+          }
+        });
+        return false;
+      }
+      if (ev.shiftKey && ev.key === "Insert") {
+        void navigator.clipboard.readText().then((text) => {
+          if (text) {
+            try {
+              bc.postMessage({ t: "in", d: text });
+            } catch {
+              setBanner("No se pudo enviar pegado.");
+            }
+          }
+        });
+        return false;
+      }
+      return true;
+    });
+
+    term.onData((d) => {
+      try {
+        bc.postMessage({ t: "in", d });
+      } catch {
+        /* ignore */
+      }
+    });
+
+    const onBc = (ev: MessageEvent) => {
+      const m = ev.data as {
+        t?: string;
+        buf?: ArrayBuffer;
+        message?: string;
+        command?: string;
+      } | null;
+      if (!m || typeof m !== "object") return;
+      if (m.t === "out" && m.buf instanceof ArrayBuffer) {
+        term.write(dec.decode(new Uint8Array(m.buf)));
+        term.scrollToBottom();
+        return;
+      }
+      if (m.t === "cmd" && typeof m.command === "string") setCmd(m.command);
+      if (m.t === "auth_hint" && typeof m.message === "string") setBanner(m.message);
+      if (m.t === "fatal" && typeof m.message === "string") {
+        setFatal(m.message);
+        return;
+      }
+      if (m.t === "exit") {
+        setBanner("Sesión SSH finalizada.");
+        return;
+      }
+      if (m.t === "owner-close") {
+        setBanner("Cerrado desde el panel principal.");
+        setTimeout(() => window.close(), 0);
+      }
+    };
+    bc.addEventListener("message", onBc);
+
+    const onPaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      const text = e.clipboardData?.getData("text/plain");
+      if (text) {
+        try {
+          bc.postMessage({ t: "in", d: text });
+        } catch {
+          setBanner("No se pudo pegar.");
+        }
+      }
+    };
+    termEl.addEventListener("paste", onPaste);
+
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      const pad = 8;
+      const mw = 168;
+      const mh = 80;
+      let x = Math.min(e.clientX, window.innerWidth - mw - pad);
+      let y = Math.min(e.clientY, window.innerHeight - mh - pad);
+      x = Math.max(pad, x);
+      y = Math.max(pad, y);
+      setCtxMenu({ x, y, canCopy: term.getSelection().length > 0 });
+    };
+    termEl.addEventListener("contextmenu", onContextMenu);
+
+    const ro = new ResizeObserver(() => {
+      if (!wrapRef.current) return;
+      try {
+        fit.fit();
+        bc.postMessage({ t: "resize", cols: term.cols, rows: term.rows });
+      } catch {
+        /* layout */
+      }
+    });
+    ro.observe(el);
+    requestAnimationFrame(() => {
+      try {
+        fit.fit();
+        bc.postMessage({ t: "resize", cols: term.cols, rows: term.rows });
+      } catch {
+        /* layout */
+      }
+    });
+
+    return () => {
+      ro.disconnect();
+      termEl.removeEventListener("paste", onPaste);
+      termEl.removeEventListener("contextmenu", onContextMenu);
+      bc.removeEventListener("message", onBc);
+      try {
+        bc.close();
+      } catch {
+        /* ignore */
+      }
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+      bcRef.current = null;
+    };
+  }, [dockSessionId]);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const dismissMouse = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.closest?.("[data-ssh-ctx-menu]")) return;
+      setCtxMenu(null);
+    };
+    window.addEventListener("mousedown", dismissMouse, true);
+    return () => window.removeEventListener("mousedown", dismissMouse, true);
+  }, [ctxMenu]);
+
+  const copyCmd = async () => {
+    if (!cmd || !navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setBanner("Comando copiado al portapapeles.");
+    } catch {
+      setBanner("No se pudo copiar.");
+    }
+  };
+
+  const handleClose = () => {
+    notifyMirrorBye();
+    window.close();
+  };
+
+  return (
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#070708]">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-zinc-800 px-2 py-1.5">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <TerminalIcon className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+          <span className="truncate font-mono text-xs text-emerald-300">{site}</span>
+          <span className="hidden shrink-0 text-[10px] text-zinc-500 sm:inline" title="Misma sesión SSH que en el panel">
+            · Espejo (misma sesión)
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          {cmd ? (
+            <button
+              type="button"
+              onClick={() => void copyCmd()}
+              className="inline-flex items-center gap-1 rounded-md bg-zinc-800 px-2 py-1 text-[11px] text-zinc-200 ring-1 ring-zinc-600 hover:bg-zinc-700"
+            >
+              <Copy className="h-3 w-3" />
+              Comando
+            </button>
+          ) : null}
+          <button
+            type="button"
+            title="Volver a integrar en el panel inferior de la ventana principal"
+            onClick={onReattachToDock}
+            className="inline-flex items-center gap-1 rounded-md bg-zinc-800 px-2 py-1 text-[11px] text-zinc-200 ring-1 ring-zinc-600 hover:bg-zinc-700 hover:text-cf-orange"
+          >
+            <PanelBottomOpen className="h-3 w-3 shrink-0" aria-hidden />
+            <span className="hidden sm:inline">Al panel</span>
+          </button>
+          <button
+            type="button"
+            title="Cerrar ventana (la sesión sigue en el panel)"
+            onClick={handleClose}
+            className="inline-flex items-center rounded-md bg-zinc-800 p-1.5 text-rose-200 ring-1 ring-zinc-600 hover:bg-rose-950/50"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </header>
+      {banner && !fatal ? (
+        <div className="shrink-0 border-b border-zinc-800 px-2 py-1 text-[11px] text-zinc-400">{banner}</div>
+      ) : null}
+      <div className="relative min-h-0 flex-1 overflow-hidden p-1">
+        {fatal ? (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-[#0a0a0b]/95 px-3">
+            <p className="max-w-sm text-center text-sm text-rose-100">{fatal}</p>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 ring-1 ring-zinc-600"
+            >
+              Cerrar
+            </button>
+          </div>
+        ) : null}
+        <div ref={wrapRef} className="h-full min-h-[200px] w-full" />
+      </div>
+      {!fatal ? (
+        <p className="shrink-0 border-t border-zinc-800 px-2 py-1 text-[10px] leading-snug text-zinc-500">
+          Misma sesión SSH que en el panel principal. Copiar/pegar: clic derecho o{" "}
+          <kbd className="rounded bg-zinc-800 px-0.5">Ctrl+V</kbd>.
+        </p>
+      ) : null}
+      {ctxMenu
+        ? createPortal(
+            <div
+              role="menu"
+              data-ssh-ctx-menu
+              className="fixed z-[9999] min-w-[10.5rem] overflow-hidden rounded-lg border border-zinc-600 bg-zinc-900 py-1 text-sm shadow-2xl ring-1 ring-black/50"
+              style={{ left: ctxMenu.x, top: ctxMenu.y }}
+            >
+              <button
+                type="button"
+                disabled={!ctxMenu.canCopy}
+                className="block w-full px-3 py-2 text-left text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={async () => {
+                  const t = termRef.current;
+                  const sel = t?.getSelection() ?? "";
+                  if (!sel) return;
+                  try {
+                    await navigator.clipboard.writeText(sel);
+                    setBanner("Selección copiada.");
+                  } catch {
+                    setBanner("No se pudo copiar.");
+                  }
+                  setCtxMenu(null);
+                  t?.focus();
+                }}
+              >
+                Copiar
+              </button>
+              <button
+                type="button"
+                className="block w-full px-3 py-2 text-left text-zinc-200 hover:bg-zinc-800"
+                onClick={async () => {
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    if (text && bcRef.current) bcRef.current.postMessage({ t: "in", d: text });
+                  } catch {
+                    setBanner("No se pudo leer el portapapeles.");
+                  }
+                  setCtxMenu(null);
+                  termRef.current?.focus();
+                }}
+              >
+                Pegar
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
 /** Vista mínima para `?sshPopout=1&site=…` (ventana nueva / otro monitor). */
-export function SshWebPopoutApp({ site }: { site: string }): ReactElement {
-  const [sessionId] = useState(() => crypto.randomUUID());
+export function SshWebPopoutApp({ site, dockSessionId }: { site: string; dockSessionId: string | null }): ReactElement {
+  const [standaloneSessionId] = useState(() => crypto.randomUUID());
   const handleClose = useCallback(() => {
     window.close();
   }, []);
@@ -535,7 +1029,11 @@ export function SshWebPopoutApp({ site }: { site: string }): ReactElement {
       return;
     }
     try {
-      const payload: SshWebReattachPayload = { type: SSH_WEB_REATTACH_MESSAGE_TYPE, site };
+      const payload: SshWebReattachPayload = {
+        type: SSH_WEB_REATTACH_MESSAGE_TYPE,
+        site,
+        ...(dockSessionId ? { dockSessionId } : {}),
+      };
       o.postMessage(payload, window.location.origin);
     } catch {
       window.alert("No se pudo notificar a la ventana principal. Revisa que siga abierta.");
@@ -549,13 +1047,23 @@ export function SshWebPopoutApp({ site }: { site: string }): ReactElement {
     setTimeout(() => {
       window.close();
     }, 0);
-  }, [site]);
+  }, [site, dockSessionId]);
+
+  if (dockSessionId) {
+    return (
+      <SshRelayMirrorPane
+        site={site}
+        dockSessionId={dockSessionId}
+        onReattachToDock={handleReattachToDock}
+      />
+    );
+  }
 
   return (
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#070708]">
       <SshSessionPane
         site={site}
-        sessionId={sessionId}
+        sessionId={standaloneSessionId}
         visible
         chrome="popout"
         onClose={handleClose}
@@ -657,6 +1165,16 @@ export function WebSshSessionsDock({
   const closeSession = useCallback(
     (id: string) => {
       setSessions((prev) => {
+        const victim = prev.find((s) => s.id === id);
+        if (victim?.poppedOut) {
+          try {
+            const ch = new BroadcastChannel(sshRelayChannelName(id));
+            ch.postMessage({ t: "owner-close" });
+            ch.close();
+          } catch {
+            /* ignore */
+          }
+        }
         const next = prev.filter((s) => s.id !== id);
         queueMicrotask(() => {
           setActiveId((cur) => (cur === id ? next[0]?.id ?? null : cur));
@@ -670,8 +1188,8 @@ export function WebSshSessionsDock({
   const popOutSession = useCallback(
     (id: string) => {
       const sess = sessions.find((x) => x.id === id);
-      if (!sess) return;
-      const url = buildSshWebPopoutUrl(sess.site);
+      if (!sess || sess.poppedOut) return;
+      const url = buildSshWebPopoutUrl(sess.site, sess.id);
       const w = Math.min(1200, window.screen.availWidth - 48);
       const h = Math.min(820, window.screen.availHeight - 48);
       const left = Math.max(0, Math.round((window.screen.availWidth - w) / 2));
@@ -685,9 +1203,9 @@ export function WebSshSessionsDock({
         );
         return;
       }
-      closeSession(id);
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, poppedOut: true } : s)));
     },
-    [sessions, closeSession],
+    [sessions, setSessions],
   );
 
   const minimizeSession = useCallback(
@@ -826,19 +1344,23 @@ export function WebSshSessionsDock({
                   </span>
                   <button
                     type="button"
-                    onClick={() => activateTab(s.id)}
+                    onClick={() => {
+                      if (!s.poppedOut) activateTab(s.id);
+                    }}
+                    title={s.poppedOut ? "Sesión abierta en ventana emergente" : undefined}
                     className={`max-w-[10rem] truncate px-2 py-1.5 text-left text-xs font-medium ${
                       active ? "text-cf-orange" : "text-zinc-300"
-                    }`}
+                    } ${s.poppedOut ? "opacity-60" : ""}`}
                   >
                     {s.site}
-                    {s.minimized ? " · ○" : ""}
+                    {s.poppedOut ? " · ↗" : s.minimized ? " · ○" : ""}
                   </button>
                   <button
                     type="button"
-                    title="Abrir en ventana nueva (otro monitor)"
+                    title={s.poppedOut ? "Ya está en ventana emergente" : "Abrir en ventana nueva (otro monitor)"}
+                    disabled={Boolean(s.poppedOut)}
                     onClick={() => popOutSession(s.id)}
-                    className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-cf-orange"
+                    className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-cf-orange disabled:cursor-not-allowed disabled:opacity-30"
                   >
                     <ExternalLink className="h-3.5 w-3.5" aria-hidden />
                   </button>
@@ -946,17 +1468,26 @@ export function WebSshSessionsDock({
         }
       >
         {sessions.map((s) => {
-          const paneVisible = !allMinimized && s.id === activeId && !s.minimized;
+          const holdWsOffscreen = Boolean(s.poppedOut);
+          const paneVisible = !allMinimized && s.id === activeId && !s.minimized && !s.poppedOut;
           return (
             <div
               key={s.id}
-              className={`absolute inset-0 flex min-h-0 flex-col ${paneVisible ? "z-10" : "z-0"}`}
-              style={{ display: paneVisible ? "flex" : "none" }}
+              className={
+                holdWsOffscreen
+                  ? "pointer-events-none fixed -left-[10000px] top-0 z-0 flex min-h-0 h-[480px] w-[min(960px,100vw)] flex-col overflow-hidden opacity-0"
+                  : `absolute inset-0 flex min-h-0 flex-col ${paneVisible ? "z-10" : "z-0"}`
+              }
+              style={{ display: holdWsOffscreen || paneVisible ? "flex" : "none" }}
             >
               <SshSessionPane
                 site={s.site}
                 sessionId={s.id}
-                visible={paneVisible}
+                visible={paneVisible || holdWsOffscreen}
+                relayPoppedOut={holdWsOffscreen}
+                onRelayMirrorClosed={() => {
+                  setSessions((prev) => prev.map((x) => (x.id === s.id ? { ...x, poppedOut: false } : x)));
+                }}
                 onClose={() => closeSession(s.id)}
                 onMinimize={() => minimizeSession(s.id)}
                 onSshSessionEnd={() => closeSession(s.id)}

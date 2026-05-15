@@ -4,6 +4,7 @@ import {
   ChevronDown,
   Cloud,
   Database,
+  GripVertical,
   Loader2,
   LogOut,
   Pencil,
@@ -16,11 +17,11 @@ import {
   Users,
   Wifi,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
 
 import { API_BASE, api, apiUrl, bearerHeaders, setAccessToken } from "./apiClient";
 import {
-  parseSshWebPopoutSite,
+  parseSshWebPopoutParams,
   SshWebPopoutApp,
   SSH_WEB_REATTACH_MESSAGE_TYPE,
   WebSshSessionsDock,
@@ -460,6 +461,22 @@ function UsersAdminPage({ me }: { me: AuthUser }) {
   );
 }
 
+const CF_FAB_POS_STORAGE = "atlasvpn-cf-fab-pos";
+
+function readCfFabPosFromStorage(): { left: number; top: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(CF_FAB_POS_STORAGE);
+    if (!raw) return null;
+    const j = JSON.parse(raw) as { left?: unknown; top?: unknown };
+    if (typeof j.left !== "number" || typeof j.top !== "number") return null;
+    if (!Number.isFinite(j.left) || !Number.isFinite(j.top)) return null;
+    return { left: j.left, top: j.top };
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [authPhase, setAuthPhase] = useState<"loading" | "login" | "app">("loading");
   const [me, setMe] = useState<AuthUser | null>(null);
@@ -472,9 +489,11 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [sshWebSessions, setSshWebSessions] = useState<SshWebSession[]>([]);
   const [activeSshWebId, setActiveSshWebId] = useState<string | null>(null);
-  const [sshPopoutSite] = useState(() =>
-    typeof window !== "undefined" ? parseSshWebPopoutSite(window.location.search) : null,
+  const [sshPopoutParams] = useState(() =>
+    typeof window !== "undefined" ? parseSshWebPopoutParams(window.location.search) : null,
   );
+  const sshPopoutSite = sshPopoutParams?.site ?? null;
+  const sshPopoutDockSessionId = sshPopoutParams?.dockSessionId ?? null;
 
   const openSshWebSession = useCallback((site: string) => {
     const id = crypto.randomUUID();
@@ -486,9 +505,17 @@ export default function App() {
     if (sshPopoutSite) return;
     const onMsg = (ev: MessageEvent) => {
       if (ev.origin !== window.location.origin) return;
-      const d = ev.data as { type?: string; site?: string } | null;
+      const d = ev.data as { type?: string; site?: string; dockSessionId?: string } | null;
       if (!d || d.type !== SSH_WEB_REATTACH_MESSAGE_TYPE) return;
       const site = typeof d.site === "string" ? d.site.trim() : "";
+      const dockSessionId = typeof d.dockSessionId === "string" ? d.dockSessionId.trim() : "";
+      if (dockSessionId) {
+        setSshWebSessions((prev) =>
+          prev.map((s) => (s.id === dockSessionId ? { ...s, poppedOut: false } : s)),
+        );
+        setActiveSshWebId(dockSessionId);
+        return;
+      }
       if (!site) return;
       openSshWebSession(site);
     };
@@ -509,10 +536,119 @@ export default function App() {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   /** Cloudflare: tras guardar, vista resumida para no editar Account ID por accidente. */
   const [cfCredentialsLocked, setCfCredentialsLocked] = useState(false);
+  const [cfFabPos, setCfFabPos] = useState<{ left: number; top: number } | null>(readCfFabPosFromStorage);
+  const cfFabPanelRef = useRef<HTMLDivElement>(null);
+  const cfFabDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origLeft: number;
+    origTop: number;
+    w: number;
+    h: number;
+  } | null>(null);
+  const cfFabDidClampRef = useRef(false);
 
   const appendLog = useCallback((lines: string[]) => {
     setLogs((prev) => [...prev, ...lines].slice(-200));
   }, []);
+
+  const clampCfFabPos = useCallback((left: number, top: number, w: number, h: number) => {
+    const pad = 8;
+    return {
+      left: Math.round(Math.min(window.innerWidth - w - pad, Math.max(pad, left))),
+      top: Math.round(Math.min(window.innerHeight - h - pad, Math.max(pad, top))),
+    };
+  }, []);
+
+  const endCfFabDrag = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    const d = cfFabDragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    cfFabDragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    setCfFabPos((cur) => {
+      if (cur) {
+        try {
+          sessionStorage.setItem(CF_FAB_POS_STORAGE, JSON.stringify(cur));
+        } catch {
+          /* ignore */
+        }
+      }
+      return cur;
+    });
+  }, []);
+
+  const onCfFabHandlePointerDown = useCallback(
+    (e: PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      const panel = cfFabPanelRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      const origLeft = cfFabPos != null ? cfFabPos.left : rect.left;
+      const origTop = cfFabPos != null ? cfFabPos.top : rect.top;
+      if (cfFabPos == null) {
+        setCfFabPos({ left: origLeft, top: origTop });
+      }
+      cfFabDragRef.current = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        origLeft,
+        origTop,
+        w: rect.width,
+        h: rect.height,
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [cfFabPos],
+  );
+
+  const onCfFabHandlePointerMove = useCallback(
+    (e: PointerEvent<HTMLDivElement>) => {
+      const d = cfFabDragRef.current;
+      if (!d || e.pointerId !== d.pointerId) return;
+      const nl = d.origLeft + (e.clientX - d.startX);
+      const nt = d.origTop + (e.clientY - d.startY);
+      setCfFabPos(clampCfFabPos(nl, nt, d.w, d.h));
+    },
+    [clampCfFabPos],
+  );
+
+  useEffect(() => {
+    const onResize = () => {
+      setCfFabPos((cur) => {
+        if (cur == null || !cfFabPanelRef.current) return cur;
+        const r = cfFabPanelRef.current.getBoundingClientRect();
+        return clampCfFabPos(cur.left, cur.top, r.width, r.height);
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [clampCfFabPos]);
+
+  useLayoutEffect(() => {
+    if (me?.role !== "admin") {
+      cfFabDidClampRef.current = false;
+      return;
+    }
+    if (cfFabDidClampRef.current) return;
+    if (cfFabPos == null || !cfFabPanelRef.current) return;
+    const r = cfFabPanelRef.current.getBoundingClientRect();
+    const c = clampCfFabPos(cfFabPos.left, cfFabPos.top, r.width, r.height);
+    if (c.left !== cfFabPos.left || c.top !== cfFabPos.top) {
+      setCfFabPos(c);
+      try {
+        sessionStorage.setItem(CF_FAB_POS_STORAGE, JSON.stringify(c));
+      } catch {
+        /* ignore */
+      }
+    }
+    cfFabDidClampRef.current = true;
+  }, [me, cfFabPos, clampCfFabPos]);
 
   useEffect(() => {
     void (async () => {
@@ -834,7 +970,7 @@ export default function App() {
         </div>
       );
     }
-    return <SshWebPopoutApp site={sshPopoutSite} />;
+    return <SshWebPopoutApp site={sshPopoutSite} dockSessionId={sshPopoutDockSessionId} />;
   }
 
   if (authPhase === "loading") {
@@ -1453,31 +1589,50 @@ export default function App() {
 
       {canAdmin ? (
       <>
-      {/* Sincronización Cloudflare: acceso fijo en esquina (solo administradores) */}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[70] flex max-w-[min(100vw-1.5rem,20rem)] flex-col items-end gap-1.5 sm:bottom-5 sm:right-5">
-        <div className="pointer-events-auto flex flex-col gap-1.5 rounded-2xl border border-cf-line/90 bg-cf-panel/95 px-3 py-2.5 shadow-2xl shadow-black/40 ring-1 ring-white/10 backdrop-blur-md">
-          <div className="flex items-center gap-2">
-            {syncing ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cf-orange" aria-hidden />
-            ) : syncOk && syncMsg ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
-            ) : (
-              <Cloud className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
-            )}
-            <div className="min-w-0 flex-1 text-left">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                Cloudflare
-              </p>
-              <p className="truncate text-xs text-zinc-200">
-                {syncing
-                  ? "Sincronizando túneles…"
-                  : syncOk && syncMsg
-                    ? `Listo · ${syncMsg}`
-                    : "Pulsa para sincronizar"}
-              </p>
-              {lastSyncAt && !syncing ? (
-                <p className="truncate text-[10px] text-zinc-500">Última: {lastSyncAt}</p>
-              ) : null}
+      {/* Sincronización Cloudflare: flotante arrastrable (solo administradores) */}
+      <div
+        className={`pointer-events-none fixed z-[70] flex max-w-[min(100vw-1.5rem,20rem)] flex-col gap-1.5 ${
+          cfFabPos ? "items-start" : "items-end bottom-4 right-4 sm:bottom-5 sm:right-5"
+        }`}
+        style={cfFabPos ? { left: cfFabPos.left, top: cfFabPos.top } : undefined}
+      >
+        <div
+          ref={cfFabPanelRef}
+          className="pointer-events-auto flex flex-col gap-1.5 rounded-2xl border border-cf-line/90 bg-cf-panel/95 px-3 py-2.5 shadow-2xl shadow-black/40 ring-1 ring-white/10 backdrop-blur-md"
+        >
+          <div
+            role="presentation"
+            aria-label="Arrastra desde aquí para mover el panel de sincronización Cloudflare"
+            title="Arrastra para mover"
+            className="flex cursor-grab select-none items-center gap-1.5 border-b border-white/[0.06] pb-2 touch-none active:cursor-grabbing"
+            onPointerDown={onCfFabHandlePointerDown}
+            onPointerMove={onCfFabHandlePointerMove}
+            onPointerUp={endCfFabDrag}
+            onPointerCancel={endCfFabDrag}
+            onLostPointerCapture={endCfFabDrag}
+          >
+            <GripVertical className="h-4 w-4 shrink-0 text-zinc-600" aria-hidden />
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              {syncing ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cf-orange" aria-hidden />
+              ) : syncOk && syncMsg ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+              ) : (
+                <Cloud className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+              )}
+              <div className="min-w-0 flex-1 text-left">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Cloudflare</p>
+                <p className="truncate text-xs text-zinc-200">
+                  {syncing
+                    ? "Sincronizando túneles…"
+                    : syncOk && syncMsg
+                      ? `Listo · ${syncMsg}`
+                      : "Pulsa para sincronizar"}
+                </p>
+                {lastSyncAt && !syncing ? (
+                  <p className="truncate text-[10px] text-zinc-500">Última: {lastSyncAt}</p>
+                ) : null}
+              </div>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-1.5 pt-0.5">
