@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -21,6 +22,13 @@ from atlasvpn.paths import SCRIPTS_DIR
 from atlasvpn.web_tokens import decode_access_token
 
 log = logging.getLogger(__name__)
+
+
+def _host_stats_print(msg: str) -> None:
+    """Salida directa a stdout (p. ej. Docker) si ATLASVPN_SSH_HOST_STATS_DEBUG=1."""
+    v = (os.environ.get("ATLASVPN_SSH_HOST_STATS_DEBUG") or "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        print(f"[AtlasVPN host_stats] {msg}", flush=True)
 
 
 def _ssh_stats_payload_body() -> str:
@@ -278,7 +286,7 @@ async def run_ssh_terminal_ws(websocket: WebSocket) -> None:
                     )
                 )
 
-                stats_task = asyncio.create_task(_host_stats_pump(conn, websocket))
+                stats_task = asyncio.create_task(_host_stats_pump(conn, websocket, site, user))
                 out_task = asyncio.create_task(_pump_stdout_to_ws(websocket, process))
 
                 try:
@@ -331,11 +339,23 @@ async def run_ssh_terminal_ws(websocket: WebSocket) -> None:
         await _safe_ws_close(websocket)
 
 
-async def _host_stats_pump(conn: asyncssh.SSHClientConnection, websocket: WebSocket) -> None:
+def _clip_text(s: Any, max_len: int) -> str:
+    if s is None:
+        return ""
+    t = str(s).replace("\r", " ").replace("\n", " ").strip()
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 3] + "..."
+
+
+async def _host_stats_pump(conn: asyncssh.SSHClientConnection, websocket: WebSocket, site: str, ssh_login: str) -> None:
     """Ejecuta en el host remoto un script corto (Linux) y envía JSON por el WebSocket sin mezclarlo con el PTY."""
     body = _SSH_STATS_BODY.strip()
     if not body:
+        log.warning("host_stats: payload vacío (¿falta atlasvpn/ssh_remote_stats_payload.py?) site=%s", site)
         return
+    log.debug("host_stats: bucle iniciado site=%s tunnel_user=%s", site, ssh_login)
+    _host_stats_print(f"bucle iniciado site={site} tunnel_user={ssh_login}")
     last_rx: int | None = None
     last_tx: int | None = None
     last_t: float | None = None
@@ -348,6 +368,7 @@ async def _host_stats_pump(conn: asyncssh.SSHClientConnection, websocket: WebSoc
                 break
             now = time.monotonic()
             data: dict[str, Any] | None = None
+            last_diag = ""
             for exe in ("python3", "python"):
                 try:
                     proc = await asyncio.wait_for(
@@ -362,22 +383,40 @@ async def _host_stats_pump(conn: asyncssh.SSHClientConnection, websocket: WebSoc
                         timeout=22.0,
                     )
                 except (asyncio.TimeoutError, OSError, asyncssh.Error, ConnectionError) as e:
-                    log.debug("host_stats run %s: %s", exe, e)
+                    last_diag = f"{exe}: excepción {type(e).__name__}: {e}"
+                    log.debug("host_stats site=%s %s", site, last_diag)
                     continue
                 rc = proc.returncode
-                if rc is not None and rc != 0:
-                    continue
                 raw = (proc.stdout or "").strip()
+                stderr = (proc.stderr or "").strip() if proc.stderr else ""
+                if rc is not None and rc != 0:
+                    last_diag = (
+                        f"{exe}: rc={rc} stderr={_clip_text(stderr, 240)} "
+                        f"stdout_head={_clip_text(raw, 240)}"
+                    )
+                    log.debug("host_stats site=%s %s", site, last_diag)
+                    continue
                 if not raw:
+                    last_diag = f"{exe}: stdout vacío rc={rc!r}"
+                    log.debug("host_stats site=%s %s", site, last_diag)
                     continue
                 try:
                     parsed = json.loads(raw.splitlines()[-1])
-                except (json.JSONDecodeError, TypeError, ValueError):
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
+                    last_diag = f"{exe}: JSON inválido ({e}) stdout_tail={_clip_text(raw, 320)}"
+                    log.debug("host_stats site=%s %s", site, last_diag)
                     continue
                 if isinstance(parsed, dict):
                     data = parsed
                     break
             if data is None:
+                log.warning(
+                    "host_stats: no se obtuvieron métricas del host remoto site=%s tunnel_user=%s último_intento=%s",
+                    site,
+                    ssh_login,
+                    last_diag or "sin diagnóstico",
+                )
+                _host_stats_print(f"FALLO site={site} tunnel_user={ssh_login} -> {last_diag or 'sin diagnóstico'}")
                 continue
             rx = data.get("rx_bytes")
             tx = data.get("tx_bytes")
@@ -407,7 +446,22 @@ async def _host_stats_pump(conn: asyncssh.SSHClientConnection, websocket: WebSoc
                 break
             with contextlib.suppress(OSError, RuntimeError):
                 await websocket.send_text(json.dumps({"type": "host_stats", "stats": data}, ensure_ascii=False))
+            log.debug(
+                "host_stats: enviado site=%s hostname=%r cpu_pct=%s mem_kb=%s/%s",
+                site,
+                data.get("hostname"),
+                data.get("cpu_pct"),
+                data.get("mem_avail_kb"),
+                data.get("mem_total_kb"),
+            )
+            _host_stats_print(
+                f"OK site={site} hostname={data.get('hostname')!r} "
+                f"cpu_pct={data.get('cpu_pct')} load1={data.get('load1')} "
+                f"net_down_mbps={data.get('net_down_mbps')} net_up_mbps={data.get('net_up_mbps')}"
+            )
     except asyncio.CancelledError:
+        log.debug("host_stats: tarea cancelada site=%s", site)
+        _host_stats_print(f"tarea cancelada site={site}")
         raise
 
 

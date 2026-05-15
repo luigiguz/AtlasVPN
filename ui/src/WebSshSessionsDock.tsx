@@ -71,6 +71,15 @@ export function sshRelayChannelName(sessionId: string): string {
   return `atlasvpn-ssh-relay-${sessionId}`;
 }
 
+/** Consola del navegador: `localStorage.setItem('atlasvpn_ssh_debug','1')` y recargar; en desarrollo también está activo. */
+function sshTerminalWebDebug(): boolean {
+  try {
+    return Boolean(import.meta.env.DEV) || globalThis.localStorage?.getItem("atlasvpn_ssh_debug") === "1";
+  } catch {
+    return Boolean(import.meta.env.DEV);
+  }
+}
+
 export type SshHostDiskStat = { mount: string; pct: number };
 
 /** Métricas del host remoto (Linux) enviadas por el WebSocket; `net_*` aparece tras el segundo muestreo. */
@@ -552,6 +561,9 @@ function SshSessionPane({
           if (j.type === "host_stats") {
             const st = (j as { stats?: unknown }).stats;
             if (st && typeof st === "object") {
+              if (sshTerminalWebDebug()) {
+                console.debug("[AtlasVPN SSH] host_stats", { site, stats: st });
+              }
               setHostStats(st as SshHostStatsPayload);
               try {
                 relayBcRef.current?.postMessage({ t: "host_stats", stats: st });
@@ -999,6 +1011,9 @@ export function SshRelayMirrorPane({ site, dockSessionId, onReattachToDock }: Re
         return;
       }
       if (m.t === "host_stats" && m.stats && typeof m.stats === "object") {
+        if (sshTerminalWebDebug()) {
+          console.debug("[AtlasVPN SSH] host_stats (relay)", { site, stats: m.stats });
+        }
         setHostStats(m.stats as SshHostStatsPayload);
         return;
       }
