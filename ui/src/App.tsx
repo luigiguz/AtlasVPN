@@ -466,7 +466,6 @@ export default function App() {
 
   const [tab, setTab] = useState<"conn" | "cf" | "users" | "poslite" | "about">("conn");
   const [sites, setSites] = useState<SiteRow[]>([]);
-  const [configPath, setConfigPath] = useState("");
   /** Sitio con panel de acciones desplegado (acordeón). */
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(true);
@@ -571,7 +570,6 @@ export default function App() {
     try {
       const d = await api<SitesResponse>("/api/sites");
       setSites(d.sites);
-      setConfigPath(d.configPath);
     } catch {
       setSites([]);
     }
@@ -952,8 +950,6 @@ export default function App() {
             transition={{ duration: 0.22 }}
             className="flex min-h-0 flex-1 flex-col gap-3"
           >
-            <p className="shrink-0 break-all font-mono text-xs text-zinc-500">{configPath}</p>
-
             <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
               <motion.div
                 variants={listVariants}
