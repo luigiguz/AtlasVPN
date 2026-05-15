@@ -93,7 +93,7 @@ function SshHostStatusBar({
 }: {
   stats: SshHostStatsPayload | null;
   siteFallback: string;
-}): ReactElement | null {
+}): ReactElement {
   const histRef = useRef<number[]>([]);
   const [, tick] = useState(0);
   useEffect(() => {
@@ -104,33 +104,31 @@ function SshHostStatusBar({
     }
   }, [stats?.cpu_pct]);
 
-  if (!stats) return null;
-
   const n0 = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 });
   const n2 = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const host = (stats.hostname || siteFallback || "").trim() || siteFallback;
-  const cpu = typeof stats.cpu_pct === "number" && !Number.isNaN(stats.cpu_pct) ? stats.cpu_pct : null;
+  const host = (stats?.hostname || siteFallback || "").trim() || siteFallback || "—";
+  const cpu = stats && typeof stats.cpu_pct === "number" && !Number.isNaN(stats.cpu_pct) ? stats.cpu_pct : null;
   const cpuColor =
-    cpu == null ? "text-zinc-400" : cpu >= 85 ? "text-red-400" : cpu >= 55 ? "text-amber-300" : "text-emerald-400";
+    cpu == null ? "text-zinc-500" : cpu >= 85 ? "text-red-400" : cpu >= 55 ? "text-amber-300" : "text-emerald-400";
 
   let memLine: string | null = null;
-  const mtk = stats.mem_total_kb;
-  const mak = stats.mem_avail_kb;
+  const mtk = stats?.mem_total_kb;
+  const mak = stats?.mem_avail_kb;
   if (typeof mtk === "number" && mtk > 0 && typeof mak === "number" && mak >= 0) {
     const usedGb = (mtk - mak) / (1024 * 1024);
     const totGb = mtk / (1024 * 1024);
     memLine = `${n2.format(usedGb)} GB / ${n2.format(totGb)} GB`;
   }
 
-  const up = stats.net_up_mbps;
-  const dn = stats.net_down_mbps;
+  const up = stats?.net_up_mbps;
+  const dn = stats?.net_down_mbps;
   const upStr = typeof up === "number" && !Number.isNaN(up) ? `${n2.format(up)} Mb/s` : "—";
   const dnStr = typeof dn === "number" && !Number.isNaN(dn) ? `${n2.format(dn)} Mb/s` : "—";
 
-  const upTime = (stats.uptime_text || "").trim();
-  const user = (stats.user || "").trim();
+  const upTime = (stats?.uptime_text || "").trim();
+  const user = (stats?.user || "").trim();
 
-  const disks = Array.isArray(stats.disks) ? stats.disks : [];
+  const disks = stats && Array.isArray(stats.disks) ? stats.disks : [];
   const diskStr =
     disks.length > 0
       ? disks.map((d) => `${d.mount}: ${n0.format(d.pct)}%`).join(" · ")
@@ -152,15 +150,27 @@ function SshHostStatusBar({
   }
 
   const sep = <span className="text-zinc-600" aria-hidden>|</span>;
+  const pending = !stats;
 
   return (
     <div
-      className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-zinc-800 bg-zinc-950/95 px-2 py-1 font-mono text-[10px] text-zinc-300"
-      title="Métricas del servidor Linux (vía SSH, cada pocos segundos)"
+      className={`flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t px-2 py-1 font-mono text-[10px] ${
+        pending
+          ? "border-amber-900/50 bg-zinc-950/95 text-zinc-500"
+          : "border-zinc-800 bg-zinc-950/95 text-zinc-300"
+      }`}
+      title={
+        pending
+          ? "Esperando métricas del servidor Linux (python3/python en el host remoto). Si no cambia, despliega API actualizada o revisa que el host tenga Python."
+          : "Métricas del servidor Linux (vía SSH, cada pocos segundos)"
+      }
     >
+      {pending ? (
+        <span className="mr-1 text-amber-500/90">●</span>
+      ) : null}
       <span className="inline-flex items-center gap-1 text-zinc-200">
         <Server className="h-3 w-3 shrink-0 text-red-500" aria-hidden />
-        <span className="truncate max-w-[10rem]">{host}</span>
+        <span className="max-w-[10rem] truncate">{host}</span>
       </span>
       {sep}
       <span className="inline-flex items-center gap-1">
@@ -207,6 +217,12 @@ function SshHostStatusBar({
         <HardDrive className="h-3 w-3 shrink-0 text-zinc-500" aria-hidden />
         <span className="truncate">{diskStr ?? "—"}</span>
       </span>
+      {pending ? (
+        <>
+          {sep}
+          <span className="text-[9px] text-amber-600/90">Métricas del servidor…</span>
+        </>
+      ) : null}
     </div>
   );
 }

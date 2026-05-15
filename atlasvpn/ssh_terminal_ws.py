@@ -339,37 +339,45 @@ async def _host_stats_pump(conn: asyncssh.SSHClientConnection, websocket: WebSoc
     last_rx: int | None = None
     last_tx: int | None = None
     last_t: float | None = None
+    delay_s = 1.0
     try:
         while websocket.client_state == WebSocketState.CONNECTED:
-            await asyncio.sleep(3.0)
+            await asyncio.sleep(delay_s)
+            delay_s = 3.0
             if websocket.client_state != WebSocketState.CONNECTED:
                 break
             now = time.monotonic()
-            try:
-                proc = await asyncio.wait_for(
-                    conn.run(
-                        "python3",
-                        "-u",
-                        "-",
-                        input=body,
-                        encoding="utf-8",
-                        check=False,
-                    ),
-                    timeout=22.0,
-                )
-            except (asyncio.TimeoutError, OSError, asyncssh.Error, ConnectionError) as e:
-                log.debug("host_stats omit: %s", e)
-                continue
-            if proc.returncode != 0:
-                continue
-            raw = (proc.stdout or "").strip()
-            if not raw:
-                continue
-            try:
-                data = json.loads(raw.splitlines()[-1])
-            except (json.JSONDecodeError, TypeError, ValueError):
-                continue
-            if not isinstance(data, dict):
+            data: dict[str, Any] | None = None
+            for exe in ("python3", "python"):
+                try:
+                    proc = await asyncio.wait_for(
+                        conn.run(
+                            exe,
+                            "-u",
+                            "-",
+                            input=body,
+                            encoding="utf-8",
+                            check=False,
+                        ),
+                        timeout=22.0,
+                    )
+                except (asyncio.TimeoutError, OSError, asyncssh.Error, ConnectionError) as e:
+                    log.debug("host_stats run %s: %s", exe, e)
+                    continue
+                rc = proc.returncode
+                if rc is not None and rc != 0:
+                    continue
+                raw = (proc.stdout or "").strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw.splitlines()[-1])
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
+                if isinstance(parsed, dict):
+                    data = parsed
+                    break
+            if data is None:
                 continue
             rx = data.get("rx_bytes")
             tx = data.get("tx_bytes")
