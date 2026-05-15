@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import os
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -370,12 +371,11 @@ async def _host_stats_pump(conn: asyncssh.SSHClientConnection, websocket: WebSoc
             data: dict[str, Any] | None = None
             last_diag = ""
             for exe in ("python3", "python"):
+                remote_cmd = f"{shlex.quote(exe)} -u -"
                 try:
                     proc = await asyncio.wait_for(
                         conn.run(
-                            exe,
-                            "-u",
-                            "-",
+                            remote_cmd,
                             input=body,
                             encoding="utf-8",
                             check=False,
