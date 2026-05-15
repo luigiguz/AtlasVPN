@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import {
   ChevronsUp,
   Copy,
+  ExternalLink,
   GripHorizontal,
   GripVertical,
   Minus,
@@ -29,6 +30,34 @@ import { getAccessToken, wsUrl } from "./apiClient";
 
 export type SshWebSession = { id: string; site: string; minimized: boolean };
 
+/** Query de ventana emergente: `?sshPopout=1&site=<idSitio>` (mismo origen que la app). */
+export function parseSshWebPopoutSite(search: string): string | null {
+  try {
+    const q = search.startsWith("?") ? search.slice(1) : search;
+    const p = new URLSearchParams(q);
+    if (p.get("sshPopout") !== "1") return null;
+    const site = p.get("site")?.trim();
+    return site || null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildSshWebPopoutUrl(site: string): string {
+  const u = new URL(window.location.origin + window.location.pathname);
+  u.searchParams.set("sshPopout", "1");
+  u.searchParams.set("site", site);
+  return u.href;
+}
+
+/** `postMessage` desde la ventana emergente hacia `window.opener` para reintegrar el terminal en el dock. */
+export const SSH_WEB_REATTACH_MESSAGE_TYPE = "atlasvpn-ssh-reattach" as const;
+
+export type SshWebReattachPayload = {
+  type: typeof SSH_WEB_REATTACH_MESSAGE_TYPE;
+  site: string;
+};
+
 type DockProps = {
   sessions: SshWebSession[];
   activeId: string | null;
@@ -43,6 +72,10 @@ type PaneProps = {
   onClose: () => void;
   onMinimize: () => void;
   onSshSessionEnd?: () => void;
+  /** En ventana emergente se oculta minimizar y se adaptan textos. */
+  chrome?: "dock" | "popout";
+  /** Solo `chrome === "popout"`: vuelve a abrir la sesión en el dock de la ventana principal. */
+  onReattachToDock?: () => void;
 };
 
 function SshSessionPane({
@@ -52,6 +85,8 @@ function SshSessionPane({
   onClose,
   onMinimize,
   onSshSessionEnd,
+  chrome = "dock",
+  onReattachToDock,
 }: PaneProps): ReactElement {
   const wrapRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -356,6 +391,11 @@ function SshSessionPane({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <TerminalIcon className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
           <span className="truncate font-mono text-xs text-emerald-300">{site}</span>
+          {chrome === "popout" ? (
+            <span className="hidden shrink-0 text-[10px] text-zinc-500 sm:inline" title="Usa el borde de la ventana para moverla a otro monitor">
+              · Ventana independiente
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-1">
           {cmd ? (
@@ -368,17 +408,30 @@ function SshSessionPane({
               Comando
             </button>
           ) : null}
+          {chrome === "dock" ? (
+            <button
+              type="button"
+              title="Minimizar esta sesión (sigue en segundo plano)"
+              onClick={onMinimize}
+              className="inline-flex items-center rounded-md bg-zinc-800 p-1.5 text-zinc-200 ring-1 ring-zinc-600 hover:bg-zinc-700"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {chrome === "popout" && onReattachToDock ? (
+            <button
+              type="button"
+              title="Volver a integrar en el panel inferior de la ventana principal"
+              onClick={onReattachToDock}
+              className="inline-flex items-center gap-1 rounded-md bg-zinc-800 px-2 py-1 text-[11px] text-zinc-200 ring-1 ring-zinc-600 hover:bg-zinc-700 hover:text-cf-orange"
+            >
+              <PanelBottomOpen className="h-3 w-3 shrink-0" aria-hidden />
+              <span className="hidden sm:inline">Al panel</span>
+            </button>
+          ) : null}
           <button
             type="button"
-            title="Minimizar esta sesión (sigue en segundo plano)"
-            onClick={onMinimize}
-            className="inline-flex items-center rounded-md bg-zinc-800 p-1.5 text-zinc-200 ring-1 ring-zinc-600 hover:bg-zinc-700"
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            title="Cerrar sesión SSH"
+            title={chrome === "popout" ? "Cerrar ventana y sesión SSH" : "Cerrar sesión SSH"}
             onClick={onClose}
             className="inline-flex items-center rounded-md bg-zinc-800 p-1.5 text-rose-200 ring-1 ring-zinc-600 hover:bg-rose-950/50"
           >
@@ -462,6 +515,54 @@ function SshSessionPane({
             document.body,
           )
         : null}
+    </div>
+  );
+}
+
+/** Vista mínima para `?sshPopout=1&site=…` (ventana nueva / otro monitor). */
+export function SshWebPopoutApp({ site }: { site: string }): ReactElement {
+  const [sessionId] = useState(() => crypto.randomUUID());
+  const handleClose = useCallback(() => {
+    window.close();
+  }, []);
+
+  const handleReattachToDock = useCallback(() => {
+    const o = window.opener as Window | null;
+    if (!o || o.closed) {
+      window.alert(
+        "No hay ventana principal asociada (p. ej. abriste esta URL en una pestaña suelta). Cierra esta ventana y abre el terminal desde la app con «ventana nueva», o usa el botón cerrar.",
+      );
+      return;
+    }
+    try {
+      const payload: SshWebReattachPayload = { type: SSH_WEB_REATTACH_MESSAGE_TYPE, site };
+      o.postMessage(payload, window.location.origin);
+    } catch {
+      window.alert("No se pudo notificar a la ventana principal. Revisa que siga abierta.");
+      return;
+    }
+    try {
+      o.focus();
+    } catch {
+      /* otro origen / política del navegador */
+    }
+    setTimeout(() => {
+      window.close();
+    }, 0);
+  }, [site]);
+
+  return (
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#070708]">
+      <SshSessionPane
+        site={site}
+        sessionId={sessionId}
+        visible
+        chrome="popout"
+        onClose={handleClose}
+        onMinimize={handleClose}
+        onSshSessionEnd={handleClose}
+        onReattachToDock={handleReattachToDock}
+      />
     </div>
   );
 }
@@ -564,6 +665,29 @@ export function WebSshSessionsDock({
       });
     },
     [setSessions, setActiveId]
+  );
+
+  const popOutSession = useCallback(
+    (id: string) => {
+      const sess = sessions.find((x) => x.id === id);
+      if (!sess) return;
+      const url = buildSshWebPopoutUrl(sess.site);
+      const w = Math.min(1200, window.screen.availWidth - 48);
+      const h = Math.min(820, window.screen.availHeight - 48);
+      const left = Math.max(0, Math.round((window.screen.availWidth - w) / 2));
+      const top = Math.max(0, Math.round((window.screen.availHeight - h) / 2));
+      /* Sin noopener: la emergente conserva `window.opener` para reintegrar al dock vía postMessage. */
+      const feat = `width=${w},height=${h},left=${left},top=${top}`;
+      const win = window.open(url, `atlasvpn-ssh-${sess.id}`, feat);
+      if (!win) {
+        window.alert(
+          "El navegador bloqueó la ventana emergente. Permite ventanas para este origen e inténtalo de nuevo.",
+        );
+        return;
+      }
+      closeSession(id);
+    },
+    [sessions, closeSession],
   );
 
   const minimizeSession = useCallback(
@@ -709,6 +833,14 @@ export function WebSshSessionsDock({
                   >
                     {s.site}
                     {s.minimized ? " · ○" : ""}
+                  </button>
+                  <button
+                    type="button"
+                    title="Abrir en ventana nueva (otro monitor)"
+                    onClick={() => popOutSession(s.id)}
+                    className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-cf-orange"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden />
                   </button>
                   <button
                     type="button"

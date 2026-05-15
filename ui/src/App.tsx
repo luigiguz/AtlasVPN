@@ -19,7 +19,13 @@ import {
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import { API_BASE, api, apiUrl, bearerHeaders, setAccessToken } from "./apiClient";
-import { WebSshSessionsDock, type SshWebSession } from "./WebSshSessionsDock";
+import {
+  parseSshWebPopoutSite,
+  SshWebPopoutApp,
+  SSH_WEB_REATTACH_MESSAGE_TYPE,
+  WebSshSessionsDock,
+  type SshWebSession,
+} from "./WebSshSessionsDock";
 
 type SiteRow = {
   id: string;
@@ -467,12 +473,30 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [sshWebSessions, setSshWebSessions] = useState<SshWebSession[]>([]);
   const [activeSshWebId, setActiveSshWebId] = useState<string | null>(null);
+  const [sshPopoutSite] = useState(() =>
+    typeof window !== "undefined" ? parseSshWebPopoutSite(window.location.search) : null,
+  );
 
   const openSshWebSession = useCallback((site: string) => {
     const id = crypto.randomUUID();
     setSshWebSessions((prev) => [...prev, { id, site, minimized: false }]);
     setActiveSshWebId(id);
   }, []);
+
+  useEffect(() => {
+    if (sshPopoutSite) return;
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.origin !== window.location.origin) return;
+      const d = ev.data as { type?: string; site?: string } | null;
+      if (!d || d.type !== SSH_WEB_REATTACH_MESSAGE_TYPE) return;
+      const site = typeof d.site === "string" ? d.site.trim() : "";
+      if (!site) return;
+      openSshWebSession(site);
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [sshPopoutSite, openSshWebSession]);
+
   const logRef = useRef<HTMLPreElement>(null);
   const autoSyncStarted = useRef(false);
 
@@ -793,6 +817,27 @@ export default function App() {
     setSuf("asptienda.com");
     setCfCredentialsLocked(false);
   };
+
+  if (sshPopoutSite) {
+    if (authPhase === "loading") {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-[#070708] text-zinc-400">
+          <Loader2 className="h-10 w-10 animate-spin text-cf-orange" aria-hidden />
+        </div>
+      );
+    }
+    if (authPhase === "login") {
+      return <AuthLoginPanel onDone={(u) => { setMe(u); setAuthPhase("app"); }} />;
+    }
+    if (!me) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-[#070708] text-zinc-400">
+          <Loader2 className="h-10 w-10 animate-spin text-cf-orange" aria-hidden />
+        </div>
+      );
+    }
+    return <SshWebPopoutApp site={sshPopoutSite} />;
+  }
 
   if (authPhase === "loading") {
     return (
