@@ -6,9 +6,9 @@ import { motion } from "framer-motion";
 import {
   ChevronsUp,
   Copy,
+  GripHorizontal,
   GripVertical,
   Minus,
-  Move,
   PanelBottomOpen,
   Terminal as TerminalIcon,
   X,
@@ -485,20 +485,7 @@ export function WebSshSessionsDock({
     [],
   );
   const [dockHeightPx, setDockHeightPx] = useState(defaultDockHeight);
-  const [dockGeom, setDockGeom] = useState<{
-    bottom: number;
-    left: number | null;
-    width: number | null;
-  }>({ bottom: 0, left: null, width: null });
-  const [isDockDragging, setIsDockDragging] = useState(false);
   const [isDockResizing, setIsDockResizing] = useState(false);
-  const dockMoveRef = useRef<{
-    startX: number;
-    startY: number;
-    baseLeft: number;
-    baseBottom: number;
-    baseWidth: number;
-  } | null>(null);
   const dockResizeRef = useRef<{ startY: number; startH: number } | null>(null);
 
   const moveTab = useCallback((fromId: string, toId: string) => {
@@ -513,31 +500,6 @@ export function WebSshSessionsDock({
       return next;
     });
   }, [setSessions]);
-
-  useEffect(() => {
-    if (!isDockDragging || !dockMoveRef.current) return;
-    const onMove = (ev: PointerEvent) => {
-      const m = dockMoveRef.current;
-      if (!m) return;
-      const nl = Math.round(
-        Math.min(Math.max(8, m.baseLeft + (ev.clientX - m.startX)), window.innerWidth - m.baseWidth - 8),
-      );
-      const nb = Math.round(Math.min(Math.max(0, m.baseBottom - (ev.clientY - m.startY)), 200));
-      setDockGeom((g) => ({ ...g, left: nl, bottom: nb, width: m.baseWidth }));
-    };
-    const onUp = () => {
-      dockMoveRef.current = null;
-      setIsDockDragging(false);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [isDockDragging]);
 
   useEffect(() => {
     if (!isDockResizing || !dockResizeRef.current) return;
@@ -564,21 +526,13 @@ export function WebSshSessionsDock({
 
   useEffect(() => {
     if (dockMaximized) {
-      setIsDockDragging(false);
       setIsDockResizing(false);
-      dockMoveRef.current = null;
       dockResizeRef.current = null;
     }
   }, [dockMaximized]);
 
   useEffect(() => {
     const onWin = () => {
-      setDockGeom((g) => {
-        if (g.width == null || g.left == null) return g;
-        const w = Math.min(g.width, window.innerWidth - 16);
-        const l = Math.min(Math.max(8, g.left), window.innerWidth - w - 8);
-        return { ...g, width: w, left: l };
-      });
       setDockHeightPx((h) =>
         Math.max(280, Math.min(h, Math.min(Math.round(window.innerHeight * 0.92), window.innerHeight - 48))),
       );
@@ -647,25 +601,22 @@ export function WebSshSessionsDock({
 
   const minimizedSessions = useMemo(() => sessions.filter((s) => s.minimized), [sessions]);
 
-  const isFloating = dockGeom.width != null && dockGeom.left != null;
-
   let dockShellClass = "";
   let dockShellStyle: CSSProperties | undefined;
   if (!allMinimized && dockMaximized) {
     dockShellClass =
       "fixed inset-0 z-[95] min-h-0 max-h-none h-dvh border border-cf-line bg-[#070708]/98 shadow-2xl backdrop-blur-md";
   } else if (!allMinimized && !dockMaximized) {
-    dockShellClass = isFloating
-      ? "fixed z-[85] min-h-0 rounded-t-xl border border-cf-line bg-[#070708]/98 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] backdrop-blur-md"
-      : "fixed inset-x-0 bottom-0 z-[85] min-h-0 border-t border-cf-line bg-[#070708]/98 shadow-[0_-12px_40px_rgba(0,0,0,0.5)] backdrop-blur-md";
+    dockShellClass =
+      "fixed inset-x-0 bottom-0 z-[85] min-h-0 border-t border-cf-line bg-[#070708]/98 shadow-[0_-8px_32px_rgba(0,0,0,0.45)] backdrop-blur-md";
     dockShellStyle = {
       height: dockHeightPx,
       maxHeight: "min(92vh, calc(100dvh - 24px))",
       minHeight: 280,
-      bottom: dockGeom.bottom,
-      ...(isFloating
-        ? { left: dockGeom.left ?? 8, width: dockGeom.width ?? 400, right: "auto" }
-        : { left: 0, right: 0, width: "auto" }),
+      left: 0,
+      right: 0,
+      bottom: 0,
+      width: "auto",
     };
   }
 
@@ -677,10 +628,10 @@ export function WebSshSessionsDock({
         allMinimized
           ? "fixed inset-x-0 bottom-0 z-[92] border-t-2 border-cf-orange/60 bg-zinc-950/98 pb-3 shadow-[0_-8px_32px_rgba(0,0,0,0.55)] backdrop-blur-md"
           : dockShellClass
-      } ${!allMinimized && !dockMaximized && isDockResizing ? "ring-1 ring-cf-orange/35" : ""} ${
-        !allMinimized && !dockMaximized && isDockDragging
-          ? "z-[96] scale-[1.02] shadow-[0_28px_56px_rgba(0,0,0,0.55)] ring-1 ring-cf-orange/25 transition-[transform,box-shadow] duration-200 ease-out"
-          : "transition-[transform,box-shadow] duration-200 ease-out"
+      } ${
+        !allMinimized && !dockMaximized && isDockResizing
+          ? "z-[96] -translate-y-0.5 shadow-[0_-20px_48px_rgba(0,0,0,0.55)] ring-1 ring-cf-orange/30 transition-[transform,box-shadow] duration-150 ease-out"
+          : "transition-[transform,box-shadow] duration-150 ease-out"
       }`}
       style={allMinimized || dockMaximized ? undefined : dockShellStyle}
     >
@@ -690,9 +641,9 @@ export function WebSshSessionsDock({
             <div
               role="separator"
               aria-orientation="horizontal"
-              aria-label="Arrastra para cambiar la altura del panel"
-              title="Redimensionar altura"
-              className="group relative z-20 flex h-2 shrink-0 cursor-ns-resize items-center justify-center border-b border-zinc-800/60 bg-zinc-900/80 hover:bg-cf-orange/20"
+              aria-label="Arrastra para ajustar la altura del terminal"
+              title="Arrastra hacia arriba o abajo para cambiar la altura (panel inferior tipo Rancher)"
+              className="group relative z-20 flex h-3 shrink-0 cursor-ns-resize select-none items-center justify-center border-b border-zinc-700/90 bg-gradient-to-b from-zinc-800 via-zinc-800 to-zinc-950 hover:from-zinc-700 hover:to-zinc-900"
               onPointerDown={(e) => {
                 if (e.button !== 0) return;
                 e.preventDefault();
@@ -700,7 +651,11 @@ export function WebSshSessionsDock({
                 setIsDockResizing(true);
               }}
             >
-              <span className="pointer-events-none h-1 w-14 rounded-full bg-zinc-600 group-hover:bg-cf-orange/80" />
+              <GripHorizontal
+                className="pointer-events-none h-5 w-16 text-zinc-500 opacity-90 group-hover:text-cf-orange"
+                strokeWidth={2}
+                aria-hidden
+              />
             </div>
           ) : null}
           <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-800 bg-zinc-900/90 px-2 py-1">
@@ -774,38 +729,7 @@ export function WebSshSessionsDock({
                 </div>
               );
             })}
-            {!dockMaximized ? (
-              <div
-                role="button"
-                tabIndex={0}
-                title="Arrastra para mover el panel"
-                className={`mx-1 flex min-h-[32px] min-w-[48px] flex-1 cursor-grab items-center justify-center gap-1.5 rounded-md border border-dashed border-zinc-700/80 bg-zinc-900/40 px-2 hover:border-cf-orange/40 hover:bg-zinc-800/50 sm:min-w-[72px] ${isDockDragging ? "cursor-grabbing border-cf-orange/50 bg-zinc-800/50" : ""}`}
-                onPointerDown={(e) => {
-                  if (e.button !== 0) return;
-                  e.preventDefault();
-                  const bw = dockGeom.width ?? Math.min(960, window.innerWidth - 32);
-                  const bl = dockGeom.left ?? Math.max(8, Math.round((window.innerWidth - bw) / 2));
-                  dockMoveRef.current = {
-                    startX: e.clientX,
-                    startY: e.clientY,
-                    baseLeft: dockGeom.left ?? bl,
-                    baseBottom: dockGeom.bottom,
-                    baseWidth: bw,
-                  };
-                  if (dockGeom.width == null || dockGeom.left == null) {
-                    setDockGeom({ bottom: dockGeom.bottom, left: bl, width: bw });
-                  }
-                  setIsDockDragging(true);
-                }}
-              >
-                <Move className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-                <span className="hidden select-none text-[9px] font-medium uppercase tracking-wide text-zinc-500 sm:inline">
-                  Mover
-                </span>
-              </div>
-            ) : (
-              <div className="min-w-2 flex-1" aria-hidden />
-            )}
+            <div className="min-w-2 flex-1 shrink" aria-hidden />
             <button
               type="button"
               title={
