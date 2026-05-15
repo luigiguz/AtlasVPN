@@ -114,6 +114,8 @@ function SshSessionPane({
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const relayBcRef = useRef<BroadcastChannel | null>(null);
+  const relayPoppedOutRef = useRef(relayPoppedOut);
+  relayPoppedOutRef.current = relayPoppedOut;
   const visibleRef = useRef(visible);
   visibleRef.current = visible || relayPoppedOut;
 
@@ -128,7 +130,7 @@ function SshSessionPane({
   onRelayMirrorClosedRef.current = onRelayMirrorClosed;
 
   const refit = useCallback(() => {
-    if (relayPoppedOut) return;
+    if (relayPoppedOutRef.current) return;
     const t = termRef.current;
     const fit = fitRef.current;
     const el = wrapRef.current;
@@ -142,7 +144,7 @@ function SshSessionPane({
     } catch {
       /* layout aún sin medidas */
     }
-  }, [relayPoppedOut]);
+  }, []);
 
   useEffect(() => {
     if (!visible || relayPoppedOut) return;
@@ -151,7 +153,7 @@ function SshSessionPane({
       termRef.current?.scrollToBottom();
     });
     return () => cancelAnimationFrame(id);
-  }, [visible, refit]);
+  }, [visible, relayPoppedOut, refit]);
 
   useEffect(() => {
     if (!visible) setCtxMenu(null);
@@ -428,7 +430,7 @@ function SshSessionPane({
       fitRef.current = null;
       wsRef.current = null;
     };
-  }, [site, sessionId, refit]);
+  }, [site, sessionId]);
 
   useEffect(() => {
     if (!relayPoppedOut) {
