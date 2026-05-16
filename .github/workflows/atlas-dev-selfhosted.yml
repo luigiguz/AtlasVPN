@@ -1,10 +1,12 @@
-# Compila la imagen en el runner self-hosted (Linux ARM64) y despliega con Docker Compose
+# Mismo flujo que atlasvpn-selfhosted.yml, para la rama dev (runner self-hosted de desarrollo).
 
-name: AtlasVPN — build y deploy (self-hosted)
+name: Atlas — dev build y deploy (self-hosted)
 
 on:
   push:
-    branches: [main, master]
+    branches:
+      - dev
+      - feat/atlas-platform
     paths:
       - "atlasvpn/**"
       - "ui/**"
@@ -16,7 +18,7 @@ on:
       - "docker-entrypoint.sh"
       - "docker-compose.yml"
       - "deploy/**"
-      - ".github/workflows/atlasvpn-selfhosted.yml"
+      - ".github/workflows/atlas-dev-selfhosted.yml"
   workflow_dispatch:
     inputs:
       no_cache:
@@ -26,7 +28,7 @@ on:
         type: boolean
 
 concurrency:
-  group: atlasvpn-selfhosted-${{ github.repository }}
+  group: atlas-dev-selfhosted-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
@@ -34,7 +36,7 @@ permissions:
 
 jobs:
   build-and-deploy:
-    name: Build + Compose (RPi)
+    name: Build + Compose dev (RPi)
     runs-on:
       - self-hosted
       - Linux
