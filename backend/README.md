@@ -76,3 +76,5 @@ PYTHONPATH=backend python -m atlas_api --no-browser
 ```
 
 Docker: `backend/Dockerfile` (contexto = raíz del repo). Copia `backend/`, `ui/public/branding/` y `scripts/`.
+
+Swagger UI: `/swagger` (ReDoc: `/redoc`, OpenAPI JSON: `/openapi.json`). En producción: `https://api-atlas-vpn.verkku.com/swagger`.

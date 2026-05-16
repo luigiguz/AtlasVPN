@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -195,6 +196,31 @@ def _sites_payload(config_path: Path) -> dict[str, Any]:
     }
 
 
+def _configure_openapi(app: FastAPI) -> None:
+    """OpenAPI con esquema Bearer (JWT) para probar rutas en /swagger."""
+
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        components = schema.setdefault("components", {})
+        components.setdefault("securitySchemes", {})["BearerAuth"] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Obtén el token con POST /api/auth/login (campo `access_token`).",
+        }
+        app.openapi_schema = schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -202,7 +228,20 @@ def create_app() -> FastAPI:
         ensure_default_admin()
         yield
 
-    app = FastAPI(title="Atlas", version="1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="Atlas API",
+        description=(
+            "API de la plataforma **Atlas** (Atlas VPN, Atlas Rancher, usuarios). "
+            "Rutas protegidas: inicia sesión con `POST /api/auth/login`, copia `access_token` "
+            "y pulsa **Authorize** (Bearer)."
+        ),
+        version="1.0",
+        lifespan=lifespan,
+        docs_url="/swagger",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+    )
+    _configure_openapi(app)
     app.include_router(atlas_rancher_router)
     app.add_middleware(SessionMiddleware, **session_middleware_config())
     app.add_middleware(
@@ -489,7 +528,12 @@ def create_app() -> FastAPI:
 
         @app.get("/")
         def root_api() -> dict[str, str]:
-            return {"service": "atlas-api", "status": "ok"}
+            return {
+                "service": "atlas-api",
+                "status": "ok",
+                "swagger": "/swagger",
+                "openapi": "/openapi.json",
+            }
 
     elif STATIC_WEB.is_dir() and (STATIC_WEB / "index.html").is_file():
         assets_dir = STATIC_WEB / "assets"

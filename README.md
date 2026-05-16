@@ -79,6 +79,8 @@ docker compose build
 docker compose up -d
 ```
 
+Documentación interactiva del API (tras desplegar `atlas-api`): [https://api-atlas-vpn.verkku.com/swagger](https://api-atlas-vpn.verkku.com/swagger) · esquema OpenAPI en `/openapi.json`.
+
 ## Seguridad
 
 - Protege `.atlas/` (tokens sensibles).
