@@ -568,12 +568,17 @@ function UsersAdminPage({ me }: { me: AuthUser }) {
   );
 }
 
-const CF_FAB_POS_STORAGE = "atlasvpn-cf-fab-pos";
+const CF_FAB_POS_STORAGE = "atlas-cf-fab-pos";
+const CF_FAB_POS_LEGACY = "atlasvpn-cf-fab-pos";
 
 function readCfFabPosFromStorage(): { left: number; top: number } | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = sessionStorage.getItem(CF_FAB_POS_STORAGE);
+    let raw = sessionStorage.getItem(CF_FAB_POS_STORAGE);
+    if (!raw) {
+      raw = sessionStorage.getItem(CF_FAB_POS_LEGACY);
+      if (raw) sessionStorage.setItem(CF_FAB_POS_STORAGE, raw);
+    }
     if (!raw) return null;
     const j = JSON.parse(raw) as { left?: unknown; top?: unknown };
     if (typeof j.left !== "number" || typeof j.top !== "number") return null;
@@ -794,8 +799,8 @@ export default function App() {
       setSshWebSessions([]);
       setActiveSshWebId(null);
     };
-    window.addEventListener("atlasvpn-unauthorized", h);
-    return () => window.removeEventListener("atlasvpn-unauthorized", h);
+    window.addEventListener("atlas-unauthorized", h);
+    return () => window.removeEventListener("atlas-unauthorized", h);
   }, []);
 
   const doLogout = useCallback(async () => {
@@ -957,7 +962,7 @@ export default function App() {
           zone_id: zone,
         }),
       });
-      appendLog(["Ajustes guardados en .atlasvpn/settings.json"]);
+      appendLog(["Ajustes guardados en .atlas/settings.json"]);
       setCfCredentialsLocked(true);
     } catch (e) {
       appendLog([String(e)]);
@@ -1019,7 +1024,7 @@ export default function App() {
   const deleteCfCredentials = async () => {
     if (
       !window.confirm(
-        "¿Eliminar las credenciales Cloudflare guardadas en este equipo (.atlasvpn/settings.json)?"
+        "¿Eliminar las credenciales Cloudflare guardadas en este equipo (.atlas/settings.json)?"
       )
     ) {
       return;

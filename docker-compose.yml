@@ -2,8 +2,8 @@
 #   https://atlas-ui.verkku.com      → localhost:8080 (UI)
 #   https://api-atlas-vpn.verkku.com → localhost:8765 (API)
 #
-# UI: ATLASVPN_PUBLIC_API_URL en atlas-ui (escribe /atlasvpn-runtime-config.js).
-# API: ATLASVPN_CORS_ORIGINS debe incluir el origen de la UI (https://atlas-ui.verkku.com).
+# UI: ATLAS_PUBLIC_API_URL en atlas-ui (escribe /atlas-runtime-config.js).
+# API: ATLAS_CORS_ORIGINS debe incluir el origen de la UI (https://atlas-ui.verkku.com).
 
 name: atlas
 
@@ -11,7 +11,7 @@ services:
   atlas-api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: backend/Dockerfile
       args:
         CLOUDFLARED_VERSION: ${CLOUDFLARED_VERSION:-2026.5.0}
     image: ${ATLAS_API_IMAGE:-atlas-api}:${ATLAS_TAG:-latest}
@@ -21,16 +21,16 @@ services:
       - "${ATLAS_API_PORT:-8765}:8765"
     environment:
       TZ: ${TZ:-UTC}
-      ATLASVPN_API_ONLY: "1"
-      ATLASVPN_SESSION_SECRET: ${ATLASVPN_SESSION_SECRET:-}
-      ATLASVPN_JWT_SECRET: ${ATLASVPN_JWT_SECRET:-}
-      ATLASVPN_SECURE_COOKIES: ${ATLASVPN_SECURE_COOKIES:-0}
-      ATLASVPN_SESSION_MAX_AGE: ${ATLASVPN_SESSION_MAX_AGE:-604800}
-      ATLASVPN_DEFAULT_ADMIN_USERNAME: ${ATLASVPN_DEFAULT_ADMIN_USERNAME:-admin}
-      ATLASVPN_DEFAULT_ADMIN_PASSWORD: ${ATLASVPN_DEFAULT_ADMIN_PASSWORD:-}
-      ATLASVPN_CORS_ORIGINS: ${ATLASVPN_CORS_ORIGINS:-https://atlas-ui.verkku.com,https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173}
+      ATLAS_API_ONLY: "1"
+      ATLAS_SESSION_SECRET: ${ATLAS_SESSION_SECRET:-}
+      ATLAS_JWT_SECRET: ${ATLAS_JWT_SECRET:-}
+      ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-0}
+      ATLAS_SESSION_MAX_AGE: ${ATLAS_SESSION_MAX_AGE:-604800}
+      ATLAS_DEFAULT_ADMIN_USERNAME: ${ATLAS_DEFAULT_ADMIN_USERNAME:-admin}
+      ATLAS_DEFAULT_ADMIN_PASSWORD: ${ATLAS_DEFAULT_ADMIN_PASSWORD:-}
+      ATLAS_CORS_ORIGINS: ${ATLAS_CORS_ORIGINS:-https://atlas-ui.verkku.com,https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173}
     volumes:
-      - atlas_settings:/app/.atlasvpn
+      - atlas_settings:/app/.atlas
       - atlas_cloudflared:/app/.cloudflared-tunnels
       - ./scripts/tunnels.json:/app/scripts/tunnels.json:rw
     healthcheck:
@@ -43,9 +43,9 @@ services:
   atlas-ui:
     build:
       context: .
-      dockerfile: Dockerfile.ui
+      dockerfile: ui/Dockerfile
       args:
-        VITE_API_BASE_URL: ${ATLAS_PUBLIC_API_URL:-${ATLASVPN_PUBLIC_API_URL:-}}
+        VITE_API_BASE_URL: ${ATLAS_PUBLIC_API_URL:-}
     image: ${ATLAS_UI_IMAGE:-atlas-ui}:${ATLAS_TAG:-latest}
     container_name: atlas-ui
     restart: unless-stopped
@@ -55,7 +55,7 @@ services:
       atlas-api:
         condition: service_started
     environment:
-      ATLASVPN_PUBLIC_API_URL: https://api-atlas-vpn.verkku.com
+      ATLAS_PUBLIC_API_URL: https://api-atlas-vpn.verkku.com
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 30s

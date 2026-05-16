@@ -8,14 +8,14 @@ on:
       - dev
       - feat/atlas-platform
     paths:
-      - "atlasvpn/**"
+      - "backend/**"
       - "ui/**"
       - "scripts/**"
-      - "Logos/**"
+      - "ui/public/branding/**"
       - "requirements.txt"
-      - "Dockerfile"
-      - "Dockerfile.ui"
-      - "docker-entrypoint.sh"
+      - "backend/Dockerfile"
+      - "backend/docker-entrypoint.sh"
+      - "ui/Dockerfile"
       - "docker-compose.yml"
       - "deploy/**"
       - ".github/workflows/atlas-dev-selfhosted.yml"

@@ -2,14 +2,14 @@
 
 **Atlas** es la plataforma web de Verkku (consola con menú lateral, inicio y módulos). **Atlas VPN** es un módulo dentro de Atlas: túneles **Cloudflare Access TCP** (`cloudflared access tcp`) hacia **SSH** y **bases de datos** detrás de Zero Trust (por ejemplo `*.asptienda.com`).
 
-Por defecto `python -m atlasvpn` abre **Atlas** en una ventana de escritorio Windows (**WebView2** + React), sin abrir Chrome/Edge como navegador aparte. Opcional: `--browser`, `--tk` (CustomTkinter legacy) o `--no-browser` (solo API). El módulo Atlas VPN incluye **sincronización** desde la API de Cloudflare hacia `scripts/tunnels.json`.
+Por defecto `python -m atlas_api` abre **Atlas** en una ventana de escritorio Windows (**WebView2** + React), sin abrir Chrome/Edge como navegador aparte. Opcional: `--browser`, `--tk` (CustomTkinter legacy) o `--no-browser` (solo API). El módulo Atlas VPN incluye **sincronización** desde la API de Cloudflare hacia `scripts/tunnels.json`.
 
-> El comando y el paquete Python siguen llamándose `atlasvpn` por compatibilidad; los datos locales viven en `.atlasvpn/`.
+> Los datos locales viven en `.atlas/` (al arrancar se migra automáticamente desde `.atlasvpn/` si existía).
 
 ## Requisitos
 
 - **Python 3.10+**
-- **Node.js 18+** y `npm` (compilar la UI en `ui/` → `atlasvpn/static/web/`)
+- **Node.js 18+** y `npm` (compilar la UI en `ui/` → `ui/dist/`)
 - **WebView2** en Windows (ventana integrada)
 - **`cloudflared`** en el `PATH`
 - Cloudflare **Zero Trust / Access** con apps `NOMBRE-ssh.TUDOMINIO` y `NOMBRE-bd.TUDOMINIO`
@@ -32,7 +32,7 @@ cd ..
 ### Interfaz web (recomendado)
 
 ```powershell
-python -m atlasvpn
+python -m atlas_api
 ```
 
 En la consola web: **Inicio** (resumen), menú **Atlas VPN → Conexiones / Poslite / Cloudflare** (admin).
@@ -40,12 +40,12 @@ En la consola web: **Inicio** (resumen), menú **Atlas VPN → Conexiones / Posl
 1. **Atlas VPN → Cloudflare**: Account ID, API Token, sufijo, Zone ID opcional → **Guardar** y **Sincronizar**.
 2. **Atlas VPN → Conexiones**: sitio, **Iniciar SSH** / **BD** / terminal web.
 
-**Navegador externo:** `python -m atlasvpn --browser`. **Solo API:** `--no-browser`. **Puerto:** `--port 9000`.
+**Navegador externo:** `python -m atlas_api --browser`. **Solo API:** `--no-browser`. **Puerto:** `--port 9000`.
 
 ### CustomTkinter (legacy)
 
 ```powershell
-python -m atlasvpn --tk
+python -m atlas_api --tk
 ```
 
 ### CLI
@@ -65,24 +65,45 @@ Si falla la sync con 403: revisa permisos del token o usa **Zone ID** en Atlas V
 
 | Ruta | Contenido |
 |------|-----------|
-| `.atlasvpn/auth.json` | Hash de contraseña |
-| `.atlasvpn/settings.json` | Credenciales Cloudflare |
+| `.atlas/auth.json` | Hash de contraseña |
+| `.atlas/settings.json` | Credenciales Cloudflare |
 | `scripts/tunnels.json` | Sitios y puertos |
 | `.cloudflared-tunnels/state.json` | PIDs de `cloudflared` |
 
 ## Docker (desarrollo)
 
-Contenedores `atlas-api` y `atlas-ui`. Ver `docker-compose.yml` y workflow `.github/workflows/atlas-dev-selfhosted.yml`.
+Contenedores `atlas-api` y `atlas-ui`. Imágenes: `backend/Dockerfile` y `ui/Dockerfile` (contexto de build = raíz del repo). Ver `docker-compose.yml` y `.github/workflows/atlas-dev-selfhosted.yml`.
+
+```powershell
+docker compose build
+docker compose up -d
+```
 
 ## Seguridad
 
-- Protege `.atlasvpn/` (tokens sensibles).
+- Protege `.atlas/` (tokens sensibles).
 - Atlas VPN **no sustituye** Cloudflare Access: `cloudflared` y el navegador siguen pidiendo login cuando corresponda.
+
+## Estructura del repositorio
+
+| Carpeta | Rol |
+|---------|-----|
+| `backend/atlas_core/` | Auth, usuarios, rutas compartidas |
+| `backend/atlas_vpn/` | Módulo Atlas VPN (Cloudflare, túneles, SSH) |
+| `backend/atlas_rancher/` | Módulo Atlas Rancher (en preparación) |
+| `backend/atlas_api/` | FastAPI + entrada CLI (`python -m atlas_api`) |
+| `backend/Dockerfile` | Imagen Docker del API |
+| `ui/` | Frontend React + `public/branding/` (logos) |
+| `ui/Dockerfile` | Imagen Docker de la UI (nginx) |
+| `ui/dist/` | Build de producción (generado) |
+| `scripts/` | CLI `tunnel_manager` (cloudflared) |
+
+Detalle: [backend/README.md](backend/README.md).
 
 ## Desarrollo
 
 ```powershell
-python -m py_compile atlasvpn\web_server.py atlasvpn\cf_sync.py
+python -m py_compile backend\atlas_api\app.py backend\atlas_vpn\cf_sync.py
 cd ui && npm run build
 ```
 

@@ -69,13 +69,17 @@ export function buildSshWebPopoutUrl(site: string, dockSessionId?: string | null
 }
 
 export function sshRelayChannelName(sessionId: string): string {
-  return `atlasvpn-ssh-relay-${sessionId}`;
+  return `atlas-ssh-relay-${sessionId}`;
 }
 
-/** Consola del navegador: `localStorage.setItem('atlasvpn_ssh_debug','1')` y recargar; en desarrollo también está activo. */
+/** Consola del navegador: `localStorage.setItem('atlas_ssh_debug','1')` y recargar; en desarrollo también está activo. */
 function sshTerminalWebDebug(): boolean {
   try {
-    return Boolean(import.meta.env.DEV) || globalThis.localStorage?.getItem("atlasvpn_ssh_debug") === "1";
+    return (
+      Boolean(import.meta.env.DEV) ||
+      globalThis.localStorage?.getItem("atlas_ssh_debug") === "1" ||
+      globalThis.localStorage?.getItem("atlasvpn_ssh_debug") === "1"
+    );
   } catch {
     return Boolean(import.meta.env.DEV);
   }
@@ -238,7 +242,7 @@ function SshHostStatusBar({
 }
 
 /** `postMessage` desde la ventana emergente hacia `window.opener` para reintegrar el terminal en el dock. */
-export const SSH_WEB_REATTACH_MESSAGE_TYPE = "atlasvpn-ssh-reattach" as const;
+export const SSH_WEB_REATTACH_MESSAGE_TYPE = "atlas-ssh-reattach" as const;
 
 export type SshWebReattachPayload = {
   type: typeof SSH_WEB_REATTACH_MESSAGE_TYPE;
@@ -1419,7 +1423,7 @@ export function WebSshSessionsDock({
       flushSync(() => {
         setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, poppedOut: true } : s)));
       });
-      const win = window.open(url, `atlasvpn-ssh-${sess.id}`, feat);
+      const win = window.open(url, `atlas-ssh-${sess.id}`, feat);
       if (!win) {
         flushSync(() => {
           setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, poppedOut: false } : s)));
@@ -1540,7 +1544,9 @@ export function WebSshSessionsDock({
                   onDrop={(e) => {
                     e.preventDefault();
                     const from =
-                      e.dataTransfer.getData("application/x-atlasvpn-tab") || e.dataTransfer.getData("text/plain");
+                      e.dataTransfer.getData("application/x-atlas-tab") ||
+                      e.dataTransfer.getData("application/x-atlasvpn-tab") ||
+                      e.dataTransfer.getData("text/plain");
                     if (from) moveTab(from, s.id);
                     setDragTabId(null);
                     setDragOverTabId(null);
@@ -1550,7 +1556,7 @@ export function WebSshSessionsDock({
                     title="Arrastrar para reordenar pestañas"
                     draggable
                     onDragStart={(e) => {
-                      e.dataTransfer.setData("application/x-atlasvpn-tab", s.id);
+                      e.dataTransfer.setData("application/x-atlas-tab", s.id);
                       e.dataTransfer.setData("text/plain", s.id);
                       e.dataTransfer.effectAllowed = "move";
                       setDragTabId(s.id);

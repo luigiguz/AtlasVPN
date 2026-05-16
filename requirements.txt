@@ -2,7 +2,7 @@
 customtkinter>=5.2.0
 Pillow>=10.0.0
 
-# UI web (python -m atlasvpn) + ventana de escritorio sin navegador externo
+# UI web (python -m atlas_api) + ventana de escritorio sin navegador externo
 fastapi>=0.115.0
 itsdangerous>=2.1.0
 uvicorn[standard]>=0.32.0

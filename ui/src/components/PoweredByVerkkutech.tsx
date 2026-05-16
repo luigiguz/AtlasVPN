@@ -25,7 +25,7 @@ export function PoweredByVerkkutech({ compact = false, mini = false, className =
         Powered by
       </p>
       <img
-        src="/verkku-logo.svg"
+        src="/branding/verkku-logo.svg"
         alt="Verkkutech"
         className={
           mini
