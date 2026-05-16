@@ -247,15 +247,8 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
           setGroupOpen={setGroupOpen}
         />
       </div>
-      <div className="shrink-0 space-y-2 border-t border-white/[0.06] p-3">
-        <PoweredByVerkkutech compact className="py-1" />
-        <button
-          type="button"
-          onClick={() => onNavigate("about")}
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
-        >
-          Acerca de
-        </button>
+      <div className="shrink-0 border-t border-white/[0.06] px-3 py-2">
+        <PoweredByVerkkutech mini />
       </div>
     </div>
   );
