@@ -42,6 +42,7 @@ En Docker el `WORKDIR` es `/app`; se copia `backend/` y el comando es `python -m
 ## Atlas Rancher
 
 - Config: `.atlas/rancher.json` o variables `ATLAS_RANCHER_URL`, `ATLAS_RANCHER_TOKEN`, `ATLAS_RANCHER_INSECURE_TLS`.
+- Si Rancher está detrás de Cloudflare (Error 1010): el cliente envía `User-Agent` de navegador; opcional `ATLAS_RANCHER_CF_ACCESS_CLIENT_ID` / `ATLAS_RANCHER_CF_ACCESS_CLIENT_SECRET`, o URL interna sin proxy.
 - Admin: `POST /api/atlas-rancher/settings` (URL + token Bearer).
 - Listado: `GET /api/atlas-rancher/custom-clusters` (recurso Steve `customclusters` o clusters provisioning sin machine pools).
 

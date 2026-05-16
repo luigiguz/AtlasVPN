@@ -24,6 +24,9 @@ class RancherSettingsBody(BaseModel):
     url: str = ""
     token: str = ""
     insecure_tls: bool = False
+    cf_access_client_id: str = ""
+    cf_access_client_secret: str = ""
+    user_agent: str = ""
 
 
 @router.get("/health")
@@ -38,6 +41,9 @@ def get_rancher_settings(user: dict[str, Any] = Depends(require_roles("admin")))
         "url": s["url"],
         "token": s["token"],
         "insecure_tls": s["insecure_tls"],
+        "cf_access_client_id": s.get("cf_access_client_id", ""),
+        "cf_access_client_secret": "***" if s.get("cf_access_client_secret") else "",
+        "user_agent": s.get("user_agent", ""),
         "configured": bool(s["url"] and s["token"]),
     }
 
@@ -49,7 +55,16 @@ def post_rancher_settings(
 ) -> dict[str, bool]:
     if not body.url.strip() or not body.token.strip():
         raise HTTPException(400, "URL y token de Rancher son obligatorios.")
-    save_rancher_settings(body.url, body.token, body.insecure_tls)
+    prev = load_rancher_settings()
+    cf_secret = body.cf_access_client_secret.strip() or str(prev.get("cf_access_client_secret") or "")
+    save_rancher_settings(
+        body.url,
+        body.token,
+        body.insecure_tls,
+        cf_access_client_id=body.cf_access_client_id.strip() or str(prev.get("cf_access_client_id") or ""),
+        cf_access_client_secret=cf_secret,
+        user_agent=body.user_agent.strip() or str(prev.get("user_agent") or ""),
+    )
     return {"ok": True}
 
 

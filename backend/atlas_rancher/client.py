@@ -8,12 +8,19 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from atlas_core.env import atlas_env
+
 STEVE_CUSTOM_CLUSTER_PATHS = (
     "v1/provisioning.cattle.io.customclusters",
     "v1/provisioning.cattle.io.customcluster",
 )
 STEVE_PROVISIONING_CLUSTERS = "v1/provisioning.cattle.io.clusters"
 RANCHER_HTTP_TIMEOUT_S = 12.0
+# Cloudflare (p. ej. atlas.asptienda.com) suele bloquear Python-urllib; usar firma de navegador.
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
 
 
 class RancherConfigError(Exception):
@@ -39,36 +46,71 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _rancher_request_headers(settings: dict[str, str | bool]) -> dict[str, str]:
+    token = str(settings.get("token") or "")
+    ua = str(settings.get("user_agent") or "").strip() or atlas_env("RANCHER_USER_AGENT") or _DEFAULT_USER_AGENT
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        "User-Agent": ua,
+        "Cache-Control": "no-cache",
+    }
+    cf_id = str(settings.get("cf_access_client_id") or "").strip() or atlas_env("RANCHER_CF_ACCESS_CLIENT_ID")
+    cf_secret = (
+        str(settings.get("cf_access_client_secret") or "").strip()
+        or atlas_env("RANCHER_CF_ACCESS_CLIENT_SECRET")
+    )
+    if cf_id and cf_secret:
+        headers["CF-Access-Client-Id"] = cf_id
+        headers["CF-Access-Client-Secret"] = cf_secret
+    return headers
+
+
+def _cloudflare_hint(body: str, status: int) -> str | None:
+    if status not in (403, 503):
+        return None
+    low = body.lower()
+    if "error 1010" in low or "browser_signature" in low or "cloudflare_error" in low:
+        return (
+            " Cloudflare bloqueó la petición del servidor Atlas (Error 1010). "
+            "Usa la URL interna de Rancher sin proxy, permite la IP del RPi en WAF, "
+            "o configura CF-Access-Client-Id/Secret si Rancher está detrás de Cloudflare Access."
+        )
+    return None
+
+
 def rancher_get(
-    url: str,
-    token: str,
+    settings: dict[str, str | bool],
     path: str,
     *,
-    insecure_tls: bool = False,
     timeout_s: float = RANCHER_HTTP_TIMEOUT_S,
 ) -> Any:
+    url = str(settings.get("url") or "").strip()
+    token = str(settings.get("token") or "").strip()
+    insecure_tls = bool(settings.get("insecure_tls"))
     if not url or not token:
         raise RancherConfigError("Configura la URL y el token de Rancher (Atlas Rancher o variables ATLAS_RANCHER_*).")
     full = f"{url.rstrip('/')}/{path.lstrip('/')}"
     req = urllib.request.Request(
         full,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        },
+        headers=_rancher_request_headers(settings),
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s, context=_ssl_context(insecure_tls)) as resp:
+        with urllib.request.urlopen(
+            req, timeout=timeout_s, context=_ssl_context(insecure_tls)
+        ) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as e:
         body = ""
         try:
-            body = e.read().decode("utf-8", errors="replace")[:500]
+            body = e.read().decode("utf-8", errors="replace")[:800]
         except OSError:
             pass
+        hint = _cloudflare_hint(body, e.code) or ""
         raise RancherApiError(
-            f"Rancher respondió HTTP {e.code} en {path}" + (f": {body}" if body else ""),
+            f"Rancher respondió HTTP {e.code} en {path}" + (f": {body}" if body else "") + hint,
             status=e.code,
         ) from e
     except urllib.error.URLError as e:
@@ -189,14 +231,12 @@ def _is_connection_error(err: RancherApiError) -> bool:
     return "conectar" in msg or "timed out" in msg or "timeout" in msg
 
 
-def list_custom_clusters(settings: dict[str, str]) -> tuple[str, list[dict[str, Any]]]:
-    url = settings["url"]
-    token = settings["token"]
-    insecure = bool(settings.get("insecure_tls"))
+def list_custom_clusters(settings: dict[str, str | bool]) -> tuple[str, list[dict[str, Any]]]:
+    url = str(settings.get("url") or "")
 
     for path in STEVE_CUSTOM_CLUSTER_PATHS:
         try:
-            payload = rancher_get(url, token, path, insecure_tls=insecure)
+            payload = rancher_get(settings, path)
         except RancherApiError as e:
             if e.status == 404:
                 continue
@@ -209,7 +249,7 @@ def list_custom_clusters(settings: dict[str, str]) -> tuple[str, list[dict[str, 
             return path, normalized
 
     try:
-        payload = rancher_get(url, token, STEVE_PROVISIONING_CLUSTERS, insecure_tls=insecure)
+        payload = rancher_get(settings, STEVE_PROVISIONING_CLUSTERS)
     except RancherApiError as e:
         if _is_connection_error(e):
             raise RancherApiError(

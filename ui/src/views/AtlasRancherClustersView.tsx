@@ -55,6 +55,8 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
   const [cfgUrl, setCfgUrl] = useState("");
   const [cfgToken, setCfgToken] = useState("");
   const [cfgInsecure, setCfgInsecure] = useState(false);
+  const [cfgCfId, setCfgCfId] = useState("");
+  const [cfgCfSecret, setCfgCfSecret] = useState("");
   const [cfgSaving, setCfgSaving] = useState(false);
   const [cfgMsg, setCfgMsg] = useState("");
 
@@ -96,6 +98,8 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
         setCfgUrl(s.url ?? "");
         setCfgToken(s.token ?? "");
         setCfgInsecure(Boolean(s.insecure_tls));
+        setCfgCfId((s as { cf_access_client_id?: string }).cf_access_client_id ?? "");
+        setCfgCfSecret("");
       } catch {
         /* ignore */
       }
@@ -113,6 +117,8 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
           url: cfgUrl.trim(),
           token: cfgToken.trim(),
           insecure_tls: cfgInsecure,
+          cf_access_client_id: cfgCfId.trim(),
+          cf_access_client_secret: cfgCfSecret.trim(),
         }),
       });
       setCfgMsg("Conexión guardada.");
@@ -213,6 +219,31 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
             />
             Permitir TLS no verificado (certificado autofirmado)
           </label>
+          <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+            Cloudflare (si Rancher está detrás de CF Access)
+          </p>
+          <motion.div layout className="mt-2 grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs text-zinc-400">
+              CF-Access-Client-Id
+              <input
+                value={cfgCfId}
+                onChange={(e) => setCfgCfId(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm text-zinc-100"
+                autoComplete="off"
+              />
+            </label>
+            <label className="block text-xs text-zinc-400">
+              CF-Access-Client-Secret
+              <input
+                value={cfgCfSecret}
+                onChange={(e) => setCfgCfSecret(e.target.value)}
+                type="password"
+                placeholder="Dejar vacío para no cambiar"
+                className="mt-1 w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm text-zinc-100"
+                autoComplete="off"
+              />
+            </label>
+          </motion.div>
           {cfgMsg ? <p className="mt-2 text-xs text-zinc-400">{cfgMsg}</p> : null}
           <button
             type="submit"
