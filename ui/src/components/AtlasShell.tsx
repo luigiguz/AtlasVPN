@@ -4,10 +4,12 @@ import {
   ChevronRight,
   LogOut,
   Menu,
+  PanelLeft,
+  PanelLeftClose,
   Search,
   X,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   buildAtlasNav,
@@ -19,7 +21,8 @@ import {
   type AtlasRouteId,
 } from "../atlasNav";
 import { apiUrl } from "../apiClient";
-import { PoweredByVerkkutech } from "./PoweredByVerkkutech";
+
+const SIDEBAR_COLLAPSED_KEY = "atlas.sidebarCollapsed";
 
 type AuthUser = { username: string; role: "admin" | "operator" | "viewer" };
 
@@ -32,38 +35,60 @@ type Props = {
   children: ReactNode;
 };
 
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function NavLeafButton({
   item,
   active,
   onPick,
   indent,
+  collapsed,
 }: {
   item: AtlasNavLeaf;
   active: boolean;
   onPick: () => void;
   indent?: boolean;
+  collapsed: boolean;
 }) {
   const Icon = item.icon;
   const disabled = item.comingSoon;
+  const title = disabled ? `${item.label} (próximamente)` : item.label;
   return (
     <button
       type="button"
       disabled={disabled}
+      title={collapsed ? title : undefined}
       onClick={onPick}
       className={
         disabled
-          ? "flex w-full cursor-not-allowed items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-600"
+          ? collapsed
+            ? "flex w-full cursor-not-allowed items-center justify-center rounded-lg p-2 text-zinc-600"
+            : "flex w-full cursor-not-allowed items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-600"
           : active
-            ? "flex w-full items-center gap-2 rounded-lg bg-white/[0.08] px-2.5 py-2 text-left text-sm font-medium text-zinc-100 ring-1 ring-white/10"
-            : `flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200 ${
-                indent ? "pl-8" : ""
-              }`
+            ? collapsed
+              ? "flex w-full items-center justify-center rounded-lg bg-white/[0.08] p-2 text-zinc-100 ring-1 ring-white/10"
+              : "flex w-full items-center gap-2 rounded-lg bg-white/[0.08] px-2.5 py-2 text-left text-sm font-medium text-zinc-100 ring-1 ring-white/10"
+            : collapsed
+              ? "flex w-full items-center justify-center rounded-lg p-2 text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+              : `flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200 ${
+                  indent ? "pl-8" : ""
+                }`
       }
     >
       <Icon className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{item.label}</span>
-      {disabled ? (
-        <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] uppercase text-zinc-500">Pronto</span>
+      {!collapsed ? (
+        <>
+          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+          {disabled ? (
+            <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] uppercase text-zinc-500">Pronto</span>
+          ) : null}
+        </>
       ) : null}
     </button>
   );
@@ -75,20 +100,51 @@ function NavGroupBlock({
   onNavigate,
   open,
   onToggle,
+  collapsed,
+  onExpandSidebar,
 }: {
   group: AtlasNavGroup;
   route: AtlasRouteId;
   onNavigate: (r: AtlasRouteId) => void;
   open: boolean;
   onToggle: () => void;
+  collapsed: boolean;
+  onExpandSidebar: () => void;
 }) {
   const Icon = group.icon;
   const childActive = group.children.some((c) => !c.comingSoon && c.route === route);
+
+  const handleGroupClick = () => {
+    if (collapsed) {
+      onExpandSidebar();
+      if (!open) onToggle();
+      return;
+    }
+    onToggle();
+  };
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        title={group.label}
+        onClick={handleGroupClick}
+        className={
+          childActive
+            ? "flex w-full items-center justify-center rounded-lg bg-white/[0.08] p-2 text-zinc-100 ring-1 ring-white/10"
+            : "flex w-full items-center justify-center rounded-lg p-2 text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+        }
+      >
+        <Icon className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
+      </button>
+    );
+  }
+
   return (
     <div className="space-y-0.5">
       <button
         type="button"
-        onClick={onToggle}
+        onClick={handleGroupClick}
         className={
           childActive
             ? "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-zinc-100"
@@ -118,6 +174,7 @@ function NavGroupBlock({
                   key={child.id}
                   item={child}
                   indent
+                  collapsed={false}
                   active={!child.comingSoon && child.route === route}
                   onPick={() => {
                     if (!child.comingSoon) onNavigate(child.route);
@@ -138,21 +195,26 @@ function SidebarNav({
   onNavigate,
   groupOpen,
   setGroupOpen,
+  collapsed,
+  onExpandSidebar,
 }: {
   entries: AtlasNavEntry[];
   route: AtlasRouteId;
   onNavigate: (r: AtlasRouteId) => void;
   groupOpen: Record<string, boolean>;
   setGroupOpen: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  collapsed: boolean;
+  onExpandSidebar: () => void;
 }) {
   return (
-    <nav className="flex flex-col gap-0.5 p-2" aria-label="Navegación Atlas">
+    <nav className={`flex flex-col gap-0.5 ${collapsed ? "p-1.5" : "p-2"}`} aria-label="Navegación Atlas">
       {entries.map((entry) => {
         if (entry.kind === "leaf") {
           return (
             <NavLeafButton
               key={entry.id}
               item={entry}
+              collapsed={collapsed}
               active={!entry.comingSoon && entry.route === route}
               onPick={() => {
                 if (!entry.comingSoon) onNavigate(entry.route);
@@ -166,6 +228,8 @@ function SidebarNav({
             group={entry}
             route={route}
             onNavigate={onNavigate}
+            collapsed={collapsed}
+            onExpandSidebar={onExpandSidebar}
             open={groupOpen[entry.id] ?? entry.defaultOpen ?? false}
             onToggle={() => setGroupOpen((o) => ({ ...o, [entry.id]: !(o[entry.id] ?? entry.defaultOpen) }))}
           />
@@ -175,9 +239,66 @@ function SidebarNav({
   );
 }
 
+function SidebarQuickSearch({
+  collapsed,
+  value,
+  onChange,
+  inputRef,
+  onExpandSidebar,
+}: {
+  collapsed: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  inputRef: React.RefObject<HTMLInputElement>;
+  onExpandSidebar: () => void;
+}) {
+  if (collapsed) {
+    return (
+      <div className="flex shrink-0 justify-center px-1.5 py-2">
+        <button
+          type="button"
+          title="Búsqueda rápida (Ctrl+K)"
+          onClick={() => {
+            onExpandSidebar();
+            requestAnimationFrame(() => inputRef.current?.focus());
+          }}
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 ring-1 ring-white/[0.06] hover:bg-white/[0.04] hover:text-zinc-300"
+        >
+          <Search className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shrink-0 px-2 py-2">
+      <label className="sr-only" htmlFor="atlas-nav-search">
+        Búsqueda rápida
+      </label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" aria-hidden />
+        <input
+          id="atlas-nav-search"
+          ref={inputRef}
+          type="search"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Búsqueda rápida…"
+          className="w-full rounded-lg border border-white/[0.06] bg-black/30 py-2 pl-8 pr-[4.25rem] text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-cf-orange/40 focus:ring-1 focus:ring-cf-orange/30"
+        />
+        <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-white/10 bg-zinc-900/80 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 sm:inline">
+          Ctrl K
+        </kbd>
+      </div>
+    </div>
+  );
+}
+
 export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, children }: Props): ReactNode {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const [navQuery, setNavQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const meta = routeMeta(route);
   const navEntries = useMemo(() => buildAtlasNav(canAdmin), [canAdmin]);
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() => ({
@@ -185,6 +306,40 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
     "atlas-admin": true,
     "coming-soon": false,
   }));
+
+  const expandSidebar = useCallback(() => {
+    setSidebarCollapsed(false);
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "0");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "k") return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input, textarea, select, [contenteditable=true]")) return;
+      e.preventDefault();
+      if (sidebarCollapsed) expandSidebar();
+      requestAnimationFrame(() => searchRef.current?.focus());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sidebarCollapsed, expandSidebar]);
 
   const filteredEntries = useMemo(() => {
     const q = navQuery.trim().toLowerCase();
@@ -207,38 +362,50 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
     return out;
   }, [navEntries, navQuery]);
 
+  /** En el drawer móvil siempre expandido; en desktop respeta la preferencia guardada. */
+  const sidebarCollapsedEffective = sidebarCollapsed && !mobileOpen;
+
   const sidebar = (
     <div className="flex h-full min-h-0 flex-col bg-[#0d0f12]">
-      <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-3">
+      <div
+        className={`flex shrink-0 items-center border-b border-white/[0.06] ${
+          sidebarCollapsedEffective ? "justify-center px-2 py-3" : "gap-2.5 px-3 py-3"
+        }`}
+      >
         <img
           src={apiUrl("/api/logo")}
-          alt=""
-          className="h-8 w-auto max-w-[120px] object-contain opacity-95"
+          alt="Atlas"
+          className={`shrink-0 object-contain opacity-95 ${
+            sidebarCollapsedEffective ? "h-7 w-7" : "h-7 w-7 rounded-sm"
+          }`}
           onError={(e) => {
             e.currentTarget.style.display = "none";
           }}
         />
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold tracking-tight text-zinc-100">Atlas</p>
-          <p className="truncate text-[10px] text-zinc-500">Plataforma Verkku</p>
-        </div>
+        {!sidebarCollapsedEffective ? (
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-zinc-100" title={user.username}>
+              {user.username}
+            </p>
+            <p className="truncate text-[10px] capitalize text-zinc-500">{user.role}</p>
+          </div>
+        ) : null}
       </div>
-      <div className="shrink-0 p-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" aria-hidden />
-          <input
-            type="search"
-            value={navQuery}
-            onChange={(e) => setNavQuery(e.target.value)}
-            placeholder="Búsqueda rápida…"
-            className="w-full rounded-lg border border-white/[0.06] bg-black/30 py-2 pl-8 pr-2 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-cf-orange/40 focus:ring-1 focus:ring-cf-orange/30"
-          />
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+
+      <SidebarQuickSearch
+        collapsed={sidebarCollapsedEffective}
+        value={navQuery}
+        onChange={setNavQuery}
+        inputRef={searchRef}
+        onExpandSidebar={expandSidebar}
+      />
+
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <SidebarNav
           entries={filteredEntries}
           route={route}
+          collapsed={sidebarCollapsedEffective}
+          onExpandSidebar={expandSidebar}
           onNavigate={(r) => {
             onNavigate(r);
             setMobileOpen(false);
@@ -247,15 +414,40 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
           setGroupOpen={setGroupOpen}
         />
       </div>
-      <div className="shrink-0 border-t border-white/[0.06] px-3 py-2">
-        <PoweredByVerkkutech mini />
+
+      <div
+        className={`shrink-0 border-t border-white/[0.06] ${
+          sidebarCollapsedEffective ? "flex justify-center p-2" : "p-2"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={toggleSidebarCollapsed}
+          title={sidebarCollapsedEffective ? "Expandir barra lateral" : "Contraer barra lateral"}
+          className={`inline-flex items-center justify-center rounded-lg text-zinc-500 ring-1 ring-white/[0.06] hover:bg-white/[0.04] hover:text-zinc-300 ${
+            sidebarCollapsedEffective ? "h-9 w-9" : "h-9 w-full gap-2 px-2.5 text-xs"
+          }`}
+        >
+          {sidebarCollapsedEffective ? (
+            <PanelLeft className="h-4 w-4" aria-hidden />
+          ) : (
+            <>
+              <PanelLeftClose className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="truncate">Contraer</span>
+            </>
+          )}
+        </button>
       </div>
     </div>
   );
 
+  const desktopAsideClass = sidebarCollapsedEffective
+    ? "hidden w-14 shrink-0 border-r border-white/[0.06] md:flex md:flex-col"
+    : "hidden w-[15.5rem] shrink-0 border-r border-white/[0.06] md:flex md:flex-col";
+
   return (
     <div className="flex min-h-screen bg-[#0b0d10] text-zinc-100">
-      <aside className="hidden w-[15.5rem] shrink-0 border-r border-white/[0.06] md:flex md:flex-col">{sidebar}</aside>
+      <aside className={desktopAsideClass}>{sidebar}</aside>
 
       <AnimatePresence>
         {mobileOpen ? (
