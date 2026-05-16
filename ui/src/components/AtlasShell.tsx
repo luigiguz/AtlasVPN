@@ -23,6 +23,10 @@ import {
 import { apiUrl } from "../apiClient";
 
 const SIDEBAR_COLLAPSED_KEY = "atlas.sidebarCollapsed";
+const SIDEBAR_WIDTH_EXPANDED = 248;
+const SIDEBAR_WIDTH_COLLAPSED = 56;
+const sidebarMotion = { duration: 0.28, ease: [0.32, 0.72, 0, 1] as const };
+const sidebarContentMotion = { duration: 0.18, ease: "easeOut" as const };
 
 type AuthUser = { username: string; role: "admin" | "operator" | "viewer" };
 
@@ -122,14 +126,23 @@ function NavLeafButton({
       }
     >
       <Icon className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
-      {!collapsed ? (
-        <>
-          <span className="min-w-0 flex-1 truncate">{item.label}</span>
-          {disabled ? (
-            <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] uppercase text-zinc-500">Pronto</span>
-          ) : null}
-        </>
-      ) : null}
+      <AnimatePresence initial={false}>
+        {!collapsed ? (
+          <motion.span
+            key="label"
+            initial={{ opacity: 0, width: 0 }}
+            animate={{ opacity: 1, width: "auto" }}
+            exit={{ opacity: 0, width: 0 }}
+            transition={sidebarContentMotion}
+            className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden"
+          >
+            <span className="truncate">{item.label}</span>
+            {disabled ? (
+              <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] uppercase text-zinc-500">Pronto</span>
+            ) : null}
+          </motion.span>
+        ) : null}
+      </AnimatePresence>
     </button>
   );
 }
@@ -292,26 +305,38 @@ function SidebarQuickSearch({
   inputRef: React.RefObject<HTMLInputElement>;
   onExpandSidebar: () => void;
 }) {
-  if (collapsed) {
-    return (
-      <div className="flex shrink-0 justify-center px-1.5 py-2">
-        <button
-          type="button"
-          title="Búsqueda rápida (Ctrl+K)"
-          onClick={() => {
-            onExpandSidebar();
-            requestAnimationFrame(() => inputRef.current?.focus());
-          }}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 ring-1 ring-white/[0.06] hover:bg-white/[0.04] hover:text-zinc-300"
-        >
-          <Search className="h-4 w-4" aria-hidden />
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="shrink-0 px-2 py-2">
+    <AnimatePresence mode="wait" initial={false}>
+      {collapsed ? (
+        <motion.div
+          key="search-collapsed"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={sidebarContentMotion}
+          className="flex shrink-0 justify-center px-1.5 py-2"
+        >
+          <button
+            type="button"
+            title="Búsqueda rápida (Ctrl+K)"
+            onClick={() => {
+              onExpandSidebar();
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 ring-1 ring-white/[0.06] hover:bg-white/[0.04] hover:text-zinc-300"
+          >
+            <Search className="h-4 w-4" aria-hidden />
+          </button>
+        </motion.div>
+      ) : (
+        <motion.div
+          key="search-expanded"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={sidebarContentMotion}
+          className="shrink-0 px-2 py-2"
+        >
       <label className="sr-only" htmlFor="atlas-nav-search">
         Búsqueda rápida
       </label>
@@ -330,7 +355,9 @@ function SidebarQuickSearch({
           Ctrl K
         </kbd>
       </div>
-    </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -407,21 +434,32 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
 
   const sidebar = (
     <div className="flex h-full min-h-0 flex-col bg-[#0d0f12]">
-      <div
+      <motion.div
+        layout
+        transition={sidebarMotion}
         className={`flex w-full shrink-0 items-center border-b border-white/[0.06] ${
           sidebarCollapsedEffective ? "justify-center px-2 py-3.5" : "gap-3 px-3 py-3.5"
         }`}
       >
         <SidebarBrand collapsed={sidebarCollapsedEffective} />
-        {!sidebarCollapsedEffective ? (
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-zinc-100" title={user.username}>
-              {user.username}
-            </p>
-            <p className="truncate text-[10px] capitalize text-zinc-500">{user.role}</p>
-          </div>
-        ) : null}
-      </div>
+        <AnimatePresence initial={false}>
+          {!sidebarCollapsedEffective ? (
+            <motion.div
+              key="sidebar-user"
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -8 }}
+              transition={sidebarContentMotion}
+              className="min-w-0 flex-1 overflow-hidden"
+            >
+              <p className="truncate text-sm font-medium text-zinc-100" title={user.username}>
+                {user.username}
+              </p>
+              <p className="truncate text-[10px] capitalize text-zinc-500">{user.role}</p>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </motion.div>
 
       <SidebarQuickSearch
         collapsed={sidebarCollapsedEffective}
@@ -464,13 +502,16 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
     </div>
   );
 
-  const desktopAsideClass = sidebarCollapsedEffective
-    ? "hidden w-14 shrink-0 border-r border-white/[0.06] md:flex md:flex-col"
-    : "hidden w-[15.5rem] shrink-0 border-r border-white/[0.06] md:flex md:flex-col";
-
   return (
-    <div className="flex min-h-screen bg-[#0b0d10] text-zinc-100">
-      <aside className={desktopAsideClass}>{sidebar}</aside>
+    <motion.div className="flex min-h-screen bg-[#0b0d10] text-zinc-100">
+      <motion.aside
+        className="hidden h-full shrink-0 overflow-hidden border-r border-white/[0.06] bg-[#0d0f12] md:flex md:flex-col"
+        initial={false}
+        animate={{ width: sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED }}
+        transition={sidebarMotion}
+      >
+        {sidebar}
+      </motion.aside>
 
       <AnimatePresence>
         {mobileOpen ? (
@@ -539,6 +580,6 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
           <div className="h-full overflow-y-auto overflow-x-hidden p-4 sm:p-6">{children}</div>
         </main>
       </div>
-    </div>
+    </motion.div>
   );
 }
