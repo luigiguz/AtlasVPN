@@ -488,7 +488,7 @@ def create_app() -> FastAPI:
 
         @app.get("/")
         def root_api() -> dict[str, str]:
-            return {"service": "atlasvpn-api", "status": "ok"}
+            return {"service": "atlas-api", "status": "ok"}
 
     elif STATIC_WEB.is_dir() and (STATIC_WEB / "index.html").is_file():
         assets_dir = STATIC_WEB / "assets"

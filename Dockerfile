@@ -5,8 +5,8 @@
 
 FROM python:3.12-slim-bookworm AS runtime
 
-LABEL org.opencontainers.image.title="AtlasVPN API" \
-      org.opencontainers.image.description="AtlasVPN — API FastAPI (túneles Cloudflare Access TCP)"
+LABEL org.opencontainers.image.title="Atlas API" \
+      org.opencontainers.image.description="Atlas — API FastAPI (túneles Cloudflare Access TCP)"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

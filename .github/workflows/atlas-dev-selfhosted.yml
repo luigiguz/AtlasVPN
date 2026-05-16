@@ -43,12 +43,12 @@ jobs:
       - ARM64
 
     env:
-      COMPOSE_PROJECT_NAME: atlasvpn
+      COMPOSE_PROJECT_NAME: atlas
       DOCKER_BUILDKIT: "1"
-      ATLASVPN_API_IMAGE: atlasvpn-api
-      ATLASVPN_UI_IMAGE: atlasvpn-ui
-      ATLASVPN_TAG: ${{ github.sha }}
-      ATLASVPN_PUBLIC_API_URL: http://127.0.0.1:8765
+      ATLAS_API_IMAGE: atlas-api
+      ATLAS_UI_IMAGE: atlas-ui
+      ATLAS_TAG: ${{ github.sha }}
+      ATLAS_PUBLIC_API_URL: http://127.0.0.1:8765
 
     steps:
       - name: Checkout
@@ -90,8 +90,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker tag "${ATLASVPN_API_IMAGE}:${ATLASVPN_TAG}" "${ATLASVPN_API_IMAGE}:latest"
-          docker tag "${ATLASVPN_UI_IMAGE}:${ATLASVPN_TAG}" "${ATLASVPN_UI_IMAGE}:latest"
+          docker tag "${ATLAS_API_IMAGE}:${ATLAS_TAG}" "${ATLAS_API_IMAGE}:latest"
+          docker tag "${ATLAS_UI_IMAGE}:${ATLAS_TAG}" "${ATLAS_UI_IMAGE}:latest"
 
       - name: Desplegar (Compose)
         shell: bash
@@ -109,13 +109,13 @@ jobs:
       - name: Comprobar HTTP (local)
         shell: bash
         env:
-          ATLASVPN_API_PORT: "8765"
-          ATLASVPN_UI_PORT: "8080"
+          ATLAS_API_PORT: "8765"
+          ATLAS_UI_PORT: "8080"
         run: |
           set -euo pipefail
           sleep 3
-          api_url="http://127.0.0.1:${ATLASVPN_API_PORT}/api/health"
-          ui_url="http://127.0.0.1:${ATLASVPN_UI_PORT}/"
+          api_url="http://127.0.0.1:${ATLAS_API_PORT}/api/health"
+          ui_url="http://127.0.0.1:${ATLAS_UI_PORT}/"
           if command -v curl >/dev/null 2>&1; then
             api_code="$(curl -fsS -o /dev/null -w "%{http_code}" "$api_url" || true)"
             echo "API HTTP $api_code $api_url"
@@ -133,4 +133,4 @@ jobs:
       - name: Logs del servicio (solo si falló antes)
         if: failure()
         shell: bash
-        run: docker compose -f docker-compose.yml logs --no-color --tail=80 atlasvpn-api atlasvpn-ui || true
+        run: docker compose -f docker-compose.yml logs --no-color --tail=80 atlas-api atlas-ui || true

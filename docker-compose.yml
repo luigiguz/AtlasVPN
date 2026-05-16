@@ -1,4 +1,4 @@
-# AtlasVPN: API + UI (nginx). Túnel típico:
+# Atlas: API + UI (nginx). Túnel típico:
 #   atlas-vpn.verkku.com       → localhost:8080 (UI)
 #   api-atlas-vpn.verkku.com   → localhost:8765 (API)
 #
@@ -9,20 +9,20 @@
 #
 # CORS del API: por defecto incluye https://atlas-vpn.verkku.com
 
-name: atlasvpn
+name: atlas
 
 services:
-  atlasvpn-api:
+  atlas-api:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         CLOUDFLARED_VERSION: ${CLOUDFLARED_VERSION:-2026.5.0}
-    image: ${ATLASVPN_API_IMAGE:-atlasvpn-api}:${ATLASVPN_TAG:-latest}
-    container_name: atlasvpn-api
+    image: ${ATLAS_API_IMAGE:-atlas-api}:${ATLAS_TAG:-latest}
+    container_name: atlas-api
     restart: unless-stopped
     ports:
-      - "${ATLASVPN_API_PORT:-8765}:8765"
+      - "${ATLAS_API_PORT:-8765}:8765"
     environment:
       TZ: ${TZ:-UTC}
       ATLASVPN_API_ONLY: "1"
@@ -34,8 +34,8 @@ services:
       ATLASVPN_DEFAULT_ADMIN_PASSWORD: ${ATLASVPN_DEFAULT_ADMIN_PASSWORD:-}
       ATLASVPN_CORS_ORIGINS: ${ATLASVPN_CORS_ORIGINS:-https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173}
     volumes:
-      - atlasvpn_settings:/app/.atlasvpn
-      - atlasvpn_cloudflared:/app/.cloudflared-tunnels
+      - atlas_settings:/app/.atlasvpn
+      - atlas_cloudflared:/app/.cloudflared-tunnels
       - ./scripts/tunnels.json:/app/scripts/tunnels.json:rw
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/api/health"]
@@ -44,19 +44,19 @@ services:
       retries: 3
       start_period: 25s
 
-  atlasvpn-ui:
+  atlas-ui:
     build:
       context: .
       dockerfile: Dockerfile.ui
       args:
-        VITE_API_BASE_URL: ${ATLASVPN_PUBLIC_API_URL:-}
-    image: ${ATLASVPN_UI_IMAGE:-atlasvpn-ui}:${ATLASVPN_TAG:-latest}
-    container_name: atlasvpn-ui
+        VITE_API_BASE_URL: ${ATLAS_PUBLIC_API_URL:-${ATLASVPN_PUBLIC_API_URL:-}}
+    image: ${ATLAS_UI_IMAGE:-atlas-ui}:${ATLAS_TAG:-latest}
+    container_name: atlas-ui
     restart: unless-stopped
     ports:
-      - "${ATLASVPN_UI_PORT:-8080}:80"
+      - "${ATLAS_UI_PORT:-8080}:80"
     depends_on:
-      atlasvpn-api:
+      atlas-api:
         condition: service_started
     environment:
       ATLASVPN_PUBLIC_API_URL: https://api-atlas-vpn.verkku.com
@@ -68,5 +68,5 @@ services:
       start_period: 10s
 
 volumes:
-  atlasvpn_settings:
-  atlasvpn_cloudflared:
+  atlas_settings:
+  atlas_cloudflared:
