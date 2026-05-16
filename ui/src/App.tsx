@@ -8,17 +8,12 @@ import {
   Database,
   GripVertical,
   Loader2,
-  LogOut,
   Pencil,
   PlusCircle,
   RefreshCw,
   Search,
-  Shield,
-  Store,
   Terminal,
   Trash2,
-  Users,
-  Wifi,
 } from "lucide-react";
 import {
   useCallback,
@@ -34,6 +29,8 @@ import {
 } from "react";
 
 import { API_BASE, api, apiUrl, bearerHeaders, setAccessToken } from "./apiClient";
+import type { AtlasRouteId } from "./atlasNav";
+import { AtlasShell } from "./components/AtlasShell";
 import {
   parseSshWebPopoutParams,
   SshWebPopoutApp,
@@ -41,6 +38,7 @@ import {
   WebSshSessionsDock,
   type SshWebSession,
 } from "./WebSshSessionsDock";
+import { AtlasHomeView } from "./views/AtlasHomeView";
 
 type SiteRow = {
   id: string;
@@ -265,7 +263,7 @@ function AuthLoginPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
         className="w-full max-w-sm space-y-4 rounded-2xl border border-cf-line bg-cf-card/90 p-8 ring-1 ring-white/5"
       >
         <h1 className="text-xl font-semibold">Iniciar sesión</h1>
-        <p className="text-sm text-zinc-400">Acceso a la consola AtlasVPN.</p>
+        <p className="text-sm text-zinc-400">Acceso a la plataforma Atlas.</p>
         {err ? <p className="text-sm text-rose-300">{err}</p> : null}
         <input
           className="w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm outline-none ring-cf-orange/40 focus:ring-2"
@@ -588,7 +586,7 @@ export default function App() {
   const [authPhase, setAuthPhase] = useState<"loading" | "login" | "app">("loading");
   const [me, setMe] = useState<AuthUser | null>(null);
 
-  const [tab, setTab] = useState<"conn" | "cf" | "users" | "poslite" | "about">("conn");
+  const [tab, setTab] = useState<AtlasRouteId>("home");
   const [sites, setSites] = useState<SiteRow[]>([]);
   /** Sitio con panel de acciones desplegado (acordeón). */
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -898,7 +896,7 @@ export default function App() {
   }, [authPhase, me, acc, tok, suf, zone, appendLog, loadSites]);
 
   useEffect(() => {
-    if (me && me.role !== "admin" && (tab === "cf" || tab === "users")) setTab("conn");
+    if (me && me.role !== "admin" && (tab === "cf" || tab === "users")) setTab("home");
   }, [me, tab]);
 
   const doStart = async (site: string, services: "ssh" | "db" | "both") => {
@@ -1137,32 +1135,8 @@ export default function App() {
   const canOperate = me.role !== "viewer";
   const canAdmin = me.role === "admin";
 
-  type TabId = "conn" | "cf" | "users" | "poslite" | "about";
-  const TabBtn = ({
-    id,
-    label,
-    Icon,
-  }: {
-    id: TabId;
-    label: string;
-    Icon: typeof Shield;
-  }) => (
-    <button
-      type="button"
-      onClick={() => setTab(id)}
-      className={
-        tab === id
-          ? "flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all bg-cf-orange text-black shadow-lg shadow-cf-orange/25"
-          : "flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
-      }
-    >
-      <Icon className="h-4 w-4" />
-      {label}
-    </button>
-  );
-
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-cf-ink text-zinc-100 vpn-grid-bg">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#0b0d10] text-zinc-100">
       {sshWebSessions.length > 0 ? (
         <WebSshSessionsDock
           sessions={sshWebSessions}
@@ -1171,63 +1145,32 @@ export default function App() {
           setActiveId={setActiveSshWebId}
         />
       ) : null}
-      <div className="pointer-events-none absolute -left-32 top-20 h-72 w-72 rounded-full bg-cf-orange/25 blur-[100px] animate-float" />
-      <div className="pointer-events-none absolute -right-20 bottom-32 h-80 w-80 rounded-full bg-sky-500/15 blur-[110px] animate-float [animation-delay:-6s]" />
 
-      <header className="relative z-10 border-b border-cf-line/80 glass">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <div className="flex min-w-0 flex-1 items-center gap-4">
-            <img
-              src={apiUrl("/api/logo")}
-              alt=""
-              className="h-10 w-auto max-w-[160px] object-contain opacity-95"
-              onError={(e) => {
-                e.currentTarget.style.display = "none";
-              }}
-            />
-            <div className="min-w-0">
-              <h1 className="truncate text-lg font-semibold tracking-tight sm:text-xl">
-                AtlasVPN
-              </h1>
-              <p className="truncate text-xs text-zinc-500 sm:text-sm">
-                SSH y bases de datos · Cloudflare Access TCP
-              </p>
-            </div>
-          </div>
-          <nav className="flex flex-wrap items-center gap-2 rounded-2xl bg-black/30 p-1 ring-1 ring-white/5 sm:gap-1.5">
-            <TabBtn id="conn" label="Conexiones" Icon={Wifi} />
-            <TabBtn id="poslite" label="Poslite" Icon={Store} />
-            {canAdmin ? <TabBtn id="cf" label="Cloudflare" Icon={Cloud} /> : null}
-            {canAdmin ? <TabBtn id="users" label="Usuarios" Icon={Users} /> : null}
-            <TabBtn id="about" label="Acerca de" Icon={Shield} />
-            <div className="mx-1 hidden h-8 w-px bg-white/10 sm:block" aria-hidden />
-            <div className="flex items-center gap-2 rounded-xl px-2 py-1 text-xs text-zinc-400">
-              <span className="max-w-[7rem] truncate font-medium text-zinc-200">{me.username}</span>
-              <span className="rounded-md bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] uppercase text-zinc-400">
-                {me.role}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => void doLogout()}
-              className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-zinc-400 ring-1 ring-transparent hover:bg-white/5 hover:text-zinc-200"
-              title="Cerrar sesión"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">Salir</span>
-            </button>
-          </nav>
-        </div>
-      </header>
+      <AtlasShell
+        route={tab}
+        onNavigate={setTab}
+        user={me}
+        canAdmin={canAdmin}
+        onLogout={() => void doLogout()}
+      >
+        {tab === "home" && (
+          <AtlasHomeView
+            sites={sites}
+            canAdmin={canAdmin}
+            syncMsg={syncMsg}
+            syncOk={syncOk}
+            lastSyncAt={lastSyncAt}
+            onNavigate={setTab}
+          />
+        )}
 
-      <main className="relative z-10 mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-4 py-6 sm:px-6">
         {tab === "conn" && (
           <motion.div
             key="conn"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.22 }}
-            className="flex min-h-0 flex-1 flex-col gap-3"
+            className="flex min-h-[calc(100dvh-9rem)] flex-col gap-3"
           >
             <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
               <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -1746,7 +1689,7 @@ export default function App() {
               <h3 className="font-semibold text-cf-orange">Qué es</h3>
               <div className="mt-3 space-y-3 text-sm leading-relaxed text-zinc-300">
                 <p>
-                  <span className="font-medium text-zinc-200">AtlasVPN</span> es una aplicación web destinada a la
+                  <span className="font-medium text-zinc-200">Atlas</span> es la plataforma web; el módulo <span className="font-medium text-zinc-200">Atlas VPN</span> es una aplicación destinada a la
                   administración de accesos remotos hacia los sistemas de sus locales u oficinas. Ofrece un panel único
                   en el navegador desde el que se consulta el estado de cada sitio, se inician o detienen los túneles
                   cifrados cuando procede y se accede, cuando el túnel está activo, a utilidades como la terminal por
@@ -1779,7 +1722,7 @@ export default function App() {
             </motion.div>
           </motion.div>
         )}
-      </main>
+      </AtlasShell>
 
       {canAdmin ? (
       <>
