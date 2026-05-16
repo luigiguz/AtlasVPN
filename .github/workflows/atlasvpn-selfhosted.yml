@@ -1,6 +1,7 @@
-# Compila la imagen en el runner self-hosted (Linux ARM64) y despliega con Docker Compose
+# Compila en el runner self-hosted (Linux ARM64) y despliega con Docker Compose.
+# Solo main/master en push automático; ramas feature: usar workflow_dispatch o CI (ci.yml).
 
-name: AtlasVPN — build y deploy (self-hosted)
+name: Atlas — build y deploy (self-hosted)
 
 on:
   push:
@@ -17,12 +18,18 @@ on:
       - "docker-compose.yml"
       - "deploy/**"
       - ".github/workflows/atlasvpn-selfhosted.yml"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
     inputs:
       no_cache:
         description: "docker compose build --no-cache"
         required: false
-        default: "false"
+        default: false
+        type: boolean
+      deploy:
+        description: "Levantar contenedores tras el build (docker compose up)"
+        required: false
+        default: true
         type: boolean
 
 concurrency:
@@ -78,7 +85,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ inputs.no_cache }}" == "true" ]]; then
+          no_cache="${{ github.event_name == 'workflow_dispatch' && inputs.no_cache == true }}"
+          if [[ "$no_cache" == "true" ]]; then
             docker compose -f docker-compose.yml build --no-cache --pull
           else
             docker compose -f docker-compose.yml build --pull
@@ -92,12 +100,14 @@ jobs:
           docker tag "${ATLASVPN_UI_IMAGE}:${ATLASVPN_TAG}" "${ATLASVPN_UI_IMAGE}:latest"
 
       - name: Desplegar (Compose)
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy == true
         shell: bash
         run: |
           set -euo pipefail
           docker compose -f docker-compose.yml up -d --remove-orphans
 
       - name: Estado
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy == true
         shell: bash
         run: |
           set -euo pipefail
@@ -105,6 +115,7 @@ jobs:
           docker compose -f docker-compose.yml images
 
       - name: Comprobar HTTP (local)
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy == true
         shell: bash
         env:
           ATLASVPN_API_PORT: "8765"
