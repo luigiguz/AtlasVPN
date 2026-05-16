@@ -43,6 +43,37 @@ function readSidebarCollapsed(): boolean {
   }
 }
 
+/** Marca Atlas en la barra lateral (logo ancho desde /api/logo; recorte del icono al contraer). */
+function SidebarBrand({ collapsed }: { collapsed: boolean }) {
+  const [logoOk, setLogoOk] = useState(true);
+
+  if (!logoOk) {
+    return (
+      <span
+        className={`flex shrink-0 items-center justify-center rounded-md bg-cf-orange/15 font-bold text-cf-orange ${
+          collapsed ? "h-10 w-10 text-base" : "h-11 w-11 text-lg"
+        }`}
+        aria-hidden
+      >
+        A
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={apiUrl("/api/logo")}
+      alt="Atlas"
+      onError={() => setLogoOk(false)}
+      className={
+        collapsed
+          ? "h-10 w-10 shrink-0 rounded-md object-cover object-left opacity-95"
+          : "h-11 w-auto max-w-[11rem] shrink-0 object-contain object-left opacity-95"
+      }
+    />
+  );
+}
+
 function NavLeafButton({
   item,
   active,
@@ -369,19 +400,10 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
     <div className="flex h-full min-h-0 flex-col bg-[#0d0f12]">
       <div
         className={`flex shrink-0 items-center border-b border-white/[0.06] ${
-          sidebarCollapsedEffective ? "justify-center px-2 py-3" : "gap-2.5 px-3 py-3"
+          sidebarCollapsedEffective ? "justify-center px-2 py-3.5" : "gap-3 px-3 py-3.5"
         }`}
       >
-        <img
-          src={apiUrl("/api/logo")}
-          alt="Atlas"
-          className={`shrink-0 object-contain opacity-95 ${
-            sidebarCollapsedEffective ? "h-7 w-7" : "h-7 w-7 rounded-sm"
-          }`}
-          onError={(e) => {
-            e.currentTarget.style.display = "none";
-          }}
-        />
+        <SidebarBrand collapsed={sidebarCollapsedEffective} />
         {!sidebarCollapsedEffective ? (
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-zinc-100" title={user.username}>
@@ -415,26 +437,18 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
         />
       </div>
 
-      <div
-        className={`shrink-0 border-t border-white/[0.06] ${
-          sidebarCollapsedEffective ? "flex justify-center p-2" : "p-2"
-        }`}
-      >
+      <div className="flex shrink-0 justify-center border-t border-white/[0.06] p-2">
         <button
           type="button"
           onClick={toggleSidebarCollapsed}
           title={sidebarCollapsedEffective ? "Expandir barra lateral" : "Contraer barra lateral"}
-          className={`inline-flex items-center justify-center rounded-lg text-zinc-500 ring-1 ring-white/[0.06] hover:bg-white/[0.04] hover:text-zinc-300 ${
-            sidebarCollapsedEffective ? "h-9 w-9" : "h-9 w-full gap-2 px-2.5 text-xs"
-          }`}
+          aria-label={sidebarCollapsedEffective ? "Expandir barra lateral" : "Contraer barra lateral"}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 ring-1 ring-white/[0.06] hover:bg-white/[0.04] hover:text-zinc-300"
         >
           {sidebarCollapsedEffective ? (
             <PanelLeft className="h-4 w-4" aria-hidden />
           ) : (
-            <>
-              <PanelLeftClose className="h-4 w-4 shrink-0" aria-hidden />
-              <span className="truncate">Contraer</span>
-            </>
+            <PanelLeftClose className="h-4 w-4" aria-hidden />
           )}
         </button>
       </div>
