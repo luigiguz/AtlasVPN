@@ -1,4 +1,4 @@
-# Mismo flujo que atlasvpn-selfhosted.yml, para la rama dev (runner self-hosted de desarrollo).
+# Build y deploy en runner self-hosted (Linux ARM64) — entorno de desarrollo.
 
 name: Atlas — dev build y deploy (self-hosted)
 
