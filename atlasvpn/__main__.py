@@ -18,8 +18,8 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         description=(
-            "AtlasVPN: por defecto abre una ventana de escritorio Windows (WebView2 + React), "
-            "sin abrir Chrome/Edge como navegador."
+            "Atlas (plataforma Verkku): por defecto abre una ventana de escritorio Windows (WebView2 + React). "
+            "El módulo Atlas VPN gestiona túneles Cloudflare Access TCP."
         )
     )
     parser.add_argument(

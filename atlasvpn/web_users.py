@@ -1,4 +1,4 @@
-"""Usuarios web AtlasVPN (SQLite + Argon2id)."""
+"""Usuarios web de Atlas (SQLite + Argon2id)."""
 
 from __future__ import annotations
 

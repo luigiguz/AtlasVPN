@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibilidad: abre AtlasVPN (antes tunnel_gui)."""
+"""Compatibilidad: abre Atlas (antes tunnel_gui)."""
 
 from __future__ import annotations
 

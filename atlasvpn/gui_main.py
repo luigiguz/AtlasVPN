@@ -1,4 +1,4 @@
-"""AtlasVPN — interfaz CustomTkinter y sincronización Cloudflare."""
+"""Atlas — interfaz CustomTkinter (legacy) y sincronización del módulo Atlas VPN."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def _configure_ttk_tree() -> None:
 class MainWindow(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("AtlasVPN")
+        self.title("Atlas")
         self.geometry("1100x720")
         self.minsize(640, 440)
         self.configure(fg_color=theme.BG)
@@ -157,7 +157,7 @@ class MainWindow(ctk.CTk):
         tx.pack(side=tk.LEFT, fill=tk.Y)
         ctk.CTkLabel(
             tx,
-            text="AtlasVPN",
+            text="Atlas",
             font=theme.FONT_TITLE,
             text_color=theme.TEXT,
             fg_color="transparent",
@@ -656,7 +656,7 @@ class MainWindow(ctk.CTk):
             self._about_body_labels.append(body_lbl)
 
         card(
-            "Qué hace AtlasVPN",
+            "Módulo Atlas VPN",
             "Cliente de escritorio para levantar `cloudflared access tcp` hacia tus hostnames "
             "de SSH y base de datos publicados tras Cloudflare Access. La sincronización rellena "
             "`scripts/tunnels.json` desde la API de Cloudflare (Access, ingress de túneles y DNS opcional).",
@@ -680,7 +680,7 @@ class MainWindow(ctk.CTk):
             self._cf_suffix.get(),
             self._cf_zone.get(),
         )
-        messagebox.showinfo("AtlasVPN", "Ajustes guardados en .atlasvpn/settings.json")
+        messagebox.showinfo("Atlas", "Ajustes guardados en .atlasvpn/settings.json")
 
     def _sync_cf_async(self) -> None:
         self._start_cf_sync(dialog_on_error=True, use_disk_settings=False)
@@ -708,7 +708,7 @@ class MainWindow(ctk.CTk):
             suf = self._cf_suffix.get().strip() or "asptienda.com"
             zone = self._cf_zone.get().strip()
             if not acc or not tok:
-                messagebox.showwarning("AtlasVPN", "Account ID y API Token son obligatorios.")
+                messagebox.showwarning("Atlas", "Account ID y API Token son obligatorios.")
                 return
             save_settings(acc, tok, suf, zone)
         self._cf_sync_busy = True
@@ -744,7 +744,7 @@ class MainWindow(ctk.CTk):
                         self._log(f"ERROR sincronización: {text}")
                         self._set_cf_sync_status(False, "Error al sincronizar (ver registro)")
                         if dialog_on_error:
-                            messagebox.showerror("AtlasVPN", text)
+                            messagebox.showerror("Atlas", text)
                     self._config_path = tm.default_config_path()
                     self._lbl_path.configure(text=str(self._config_path))
                     self._fill_tree()
@@ -831,21 +831,21 @@ class MainWindow(ctk.CTk):
     def _open_ssh_terminal(self) -> None:
         site = self._selected_site()
         if not site:
-            messagebox.showwarning("AtlasVPN", "Selecciona un sitio en la tabla.")
+            messagebox.showwarning("Atlas", "Selecciona un sitio en la tabla.")
             return
         cfg = tm.load_config_optional(self._config_path)
         if not cfg:
-            messagebox.showwarning("AtlasVPN", "No hay configuración cargada.")
+            messagebox.showwarning("Atlas", "No hay configuración cargada.")
             return
         entry = (cfg.get("sites") or {}).get(site) or {}
         ssh = entry.get("ssh")
         if not isinstance(ssh, dict) or ssh.get("local_port") in (None, ""):
-            messagebox.showwarning("AtlasVPN", "Este sitio no define SSH o falta el puerto local.")
+            messagebox.showwarning("Atlas", "Este sitio no define SSH o falta el puerto local.")
             return
         try:
             port = int(ssh["local_port"])
         except (TypeError, ValueError):
-            messagebox.showerror("AtlasVPN", "Puerto SSH inválido en tunnels.json.")
+            messagebox.showerror("Atlas", "Puerto SSH inválido en tunnels.json.")
             return
         user = resolve_ssh_username(ssh)
         try:
@@ -889,12 +889,12 @@ class MainWindow(ctk.CTk):
                     )
                 else:
                     messagebox.showinfo(
-                        "AtlasVPN",
+                        "Atlas",
                         f"No se encontró terminal gráfica. Ejecuta:\nssh {user}@localhost -p {port}",
                     )
                     return
         except OSError as e:
-            messagebox.showerror("AtlasVPN", f"No se pudo abrir la terminal: {e}")
+            messagebox.showerror("Atlas", f"No se pudo abrir la terminal: {e}")
             return
         self._log(f"Terminal SSH: {user}@localhost -p {port} («{site}»)")
 
@@ -902,7 +902,7 @@ class MainWindow(ctk.CTk):
         site = self._selected_site()
         ok, msg = launch_pgadmin()
         if not ok:
-            messagebox.showerror("AtlasVPN", msg)
+            messagebox.showerror("Atlas", msg)
             return
         self._log(f"PgAdmin: {msg}")
         if site:
@@ -924,7 +924,7 @@ class MainWindow(ctk.CTk):
     def _start_async(self, services: str) -> None:
         site = self._selected_site()
         if not site:
-            messagebox.showwarning("AtlasVPN", "Selecciona un sitio en la tabla.")
+            messagebox.showwarning("Atlas", "Selecciona un sitio en la tabla.")
             return
 
         def work() -> None:
@@ -944,7 +944,7 @@ class MainWindow(ctk.CTk):
     def _stop_site(self) -> None:
         site = self._selected_site()
         if not site:
-            messagebox.showwarning("AtlasVPN", "Selecciona un sitio.")
+            messagebox.showwarning("Atlas", "Selecciona un sitio.")
             return
         for ln in tm.stop_tunnels(site):
             self._log(ln)
@@ -952,7 +952,7 @@ class MainWindow(ctk.CTk):
 
     def _stop_all(self) -> None:
         if not messagebox.askyesno(
-            "AtlasVPN", "¿Detener todos los túneles registrados en este equipo?"
+            "Atlas", "¿Detener todos los túneles registrados en este equipo?"
         ):
             return
         for ln in tm.stop_tunnels(None):

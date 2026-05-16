@@ -186,7 +186,7 @@ def _access_denied_help(account_id: str, api_token: str) -> str:
             "Access Apps / Policies Read en este account; en algunos entornos los tokens "
             "cfat_ devuelven 403 en APIs Zero Trust pese a la documentación.\n"
             "\n"
-            "Otra opción en AtlasVPN: rellena el campo **Zone ID** (Overview de la zona del dominio) "
+            "Otra opción en Atlas VPN: rellena el campo **Zone ID** (Overview de la zona del dominio) "
             "para listar aplicaciones Access «por zona» (GET …/zones/{zone_id}/access/apps) "
             "en lugar de por account.\n"
         )

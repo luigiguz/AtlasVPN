@@ -1,4 +1,4 @@
-"""Rutas del proyecto AtlasVPN."""
+"""Rutas del proyecto Atlas (datos locales en .atlasvpn/)."""
 
 from __future__ import annotations
 

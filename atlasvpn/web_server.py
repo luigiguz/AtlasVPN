@@ -1,4 +1,4 @@
-"""Servidor local FastAPI + estáticos React para la UI web de AtlasVPN."""
+"""Servidor local FastAPI + estáticos React de la plataforma Atlas (módulo Atlas VPN)."""
 
 from __future__ import annotations
 
@@ -202,7 +202,7 @@ def create_app() -> FastAPI:
         ensure_default_admin()
         yield
 
-    app = FastAPI(title="AtlasVPN", version="1.0", lifespan=lifespan)
+    app = FastAPI(title="Atlas", version="1.0", lifespan=lifespan)
     app.add_middleware(SessionMiddleware, **session_middleware_config())
     app.add_middleware(
         CORSMiddleware,
@@ -516,7 +516,7 @@ def run_web_desktop(host: str = "127.0.0.1", port: int = 8765) -> None:
         sys.exit(2)
     if not (STATIC_WEB / "index.html").is_file():
         print(
-            "AtlasVPN (web): no se encontró la UI compilada.\n"
+            "Atlas (web): no se encontró la UI compilada.\n"
             f"  Esperado: {STATIC_WEB / 'index.html'}\n"
             "  Ejecuta en la carpeta ui/:  npm install && npm run build\n",
             file=sys.stderr,
@@ -554,7 +554,7 @@ def run_web_desktop(host: str = "127.0.0.1", port: int = 8765) -> None:
 
     url = f"http://{host}:{port}/"
     webview.create_window(
-        "AtlasVPN",
+        "Atlas",
         url,
         width=1220,
         height=800,
@@ -562,7 +562,7 @@ def run_web_desktop(host: str = "127.0.0.1", port: int = 8765) -> None:
         resizable=True,
     )
     print(
-        "AtlasVPN: ventana de escritorio Windows (motor WebView2 integrado).\n"
+        "Atlas: ventana de escritorio Windows (motor WebView2 integrado).\n"
         "         No se abre Chrome ni Edge como navegador; es una ventana propia de la app.\n"
         f"         Origen local: {url}"
     )
@@ -586,7 +586,7 @@ def run_web_server(host: str = "127.0.0.1", port: int = 8765, open_browser: bool
         pass
     elif not (STATIC_WEB / "index.html").is_file():
         print(
-            "AtlasVPN (web): no se encontró la UI compilada.\n"
+            "Atlas (web): no se encontró la UI compilada.\n"
             f"  Esperado: {STATIC_WEB / 'index.html'}\n"
             "  Ejecuta en la carpeta ui/:  npm install && npm run build\n",
             file=sys.stderr,
@@ -602,5 +602,5 @@ def run_web_server(host: str = "127.0.0.1", port: int = 8765, open_browser: bool
             webbrowser.open(url)
 
         threading.Timer(0.6, _open).start()
-    print(f"AtlasVPN web: {url} (Ctrl+C para salir)")
+    print(f"Atlas web: {url} (Ctrl+C para salir)")
     uvicorn.run(app, host=host, port=port, log_level="warning")

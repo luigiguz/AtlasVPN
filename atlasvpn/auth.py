@@ -1,4 +1,4 @@
-"""Contraseña local de AtlasVPN (PBKDF2, solo almacena hash)."""
+"""Contraseña local de la plataforma Atlas (PBKDF2, solo almacena hash)."""
 
 from __future__ import annotations
 

@@ -46,7 +46,7 @@ def validate_api_token_shape(api_token: str) -> str | None:
     if "@" in api_token:
         return (
             "El valor parece una Global API Key (suele ser «correo:clave»). "
-            "AtlasVPN necesita un API Token: My Profile → API Tokens → Create Token "
+            "Atlas VPN necesita un API Token: My Profile → API Tokens → Create Token "
             "(cadena larga, sin arroba)."
         )
     if len(api_token) < 20:

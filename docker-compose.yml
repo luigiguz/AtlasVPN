@@ -1,4 +1,4 @@
-# Atlas: API + UI (nginx). Túnel típico:
+# Plataforma Atlas (API + UI nginx). Módulo Atlas VPN: túneles Cloudflare. Túnel típico:
 #   atlas-vpn.verkku.com       → localhost:8080 (UI)
 #   api-atlas-vpn.verkku.com   → localhost:8765 (API)
 #
