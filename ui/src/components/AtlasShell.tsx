@@ -60,16 +60,25 @@ function SidebarBrand({ collapsed }: { collapsed: boolean }) {
     );
   }
 
+  if (collapsed) {
+    return (
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md">
+        <img
+          src={apiUrl("/api/logo")}
+          alt="Atlas"
+          onError={() => setLogoOk(false)}
+          className="max-h-full max-w-full object-contain object-center opacity-95"
+        />
+      </div>
+    );
+  }
+
   return (
     <img
       src={apiUrl("/api/logo")}
       alt="Atlas"
       onError={() => setLogoOk(false)}
-      className={
-        collapsed
-          ? "h-10 w-10 shrink-0 rounded-md object-cover object-left opacity-95"
-          : "h-11 w-auto max-w-[11rem] shrink-0 object-contain object-left opacity-95"
-      }
+      className="h-11 w-auto max-w-[11rem] shrink-0 object-contain object-left opacity-95"
     />
   );
 }
@@ -399,7 +408,7 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
   const sidebar = (
     <div className="flex h-full min-h-0 flex-col bg-[#0d0f12]">
       <div
-        className={`flex shrink-0 items-center border-b border-white/[0.06] ${
+        className={`flex w-full shrink-0 items-center border-b border-white/[0.06] ${
           sidebarCollapsedEffective ? "justify-center px-2 py-3.5" : "gap-3 px-3 py-3.5"
         }`}
       >
@@ -437,7 +446,7 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
         />
       </div>
 
-      <div className="flex shrink-0 justify-center border-t border-white/[0.06] p-2">
+      <div className="flex shrink-0 justify-start border-t border-white/[0.06] p-2">
         <button
           type="button"
           onClick={toggleSidebarCollapsed}
