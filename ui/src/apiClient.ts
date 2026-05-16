@@ -7,7 +7,7 @@ function resolveApiBase(): string {
   return v.replace(/\/$/, "");
 }
 
-/** Base pública del API (p. ej. https://api-atlas-vpn.verkku.com). Vacío = mismo origen. */
+/** Base pública del API (p. ej. https://api-atlas-vpn.verkku.com). UI: https://atlas-ui.verkku.com. Vacío = mismo origen. */
 export const API_BASE = resolveApiBase();
 
 const TOKEN_KEY = "atlasvpn_access_token";

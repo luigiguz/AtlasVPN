@@ -1,13 +1,9 @@
-# Plataforma Atlas (API + UI nginx). Módulo Atlas VPN: túneles Cloudflare. Túnel típico:
-#   atlas-vpn.verkku.com       → localhost:8080 (UI)
-#   api-atlas-vpn.verkku.com   → localhost:8765 (API)
+# Plataforma Atlas (API + UI nginx). Túneles Cloudflare típicos:
+#   https://atlas-ui.verkku.com      → localhost:8080 (UI)
+#   https://api-atlas-vpn.verkku.com → localhost:8765 (API)
 #
-# La UI debe saber la URL pública del API. Opción recomendada (sin rebuild): variable de entorno
-# en el contenedor UI al arrancar (escribe /atlasvpn-runtime-config.js):
-#   ATLASVPN_PUBLIC_API_URL=https://api-atlas-vpn.verkku.com
-# Opcional: también en build con el mismo nombre (VITE_API_BASE_URL vía build-arg).
-#
-# CORS del API: por defecto incluye https://atlas-vpn.verkku.com
+# UI: ATLASVPN_PUBLIC_API_URL en atlas-ui (escribe /atlasvpn-runtime-config.js).
+# API: ATLASVPN_CORS_ORIGINS debe incluir el origen de la UI (https://atlas-ui.verkku.com).
 
 name: atlas
 
@@ -32,7 +28,7 @@ services:
       ATLASVPN_SESSION_MAX_AGE: ${ATLASVPN_SESSION_MAX_AGE:-604800}
       ATLASVPN_DEFAULT_ADMIN_USERNAME: ${ATLASVPN_DEFAULT_ADMIN_USERNAME:-admin}
       ATLASVPN_DEFAULT_ADMIN_PASSWORD: ${ATLASVPN_DEFAULT_ADMIN_PASSWORD:-}
-      ATLASVPN_CORS_ORIGINS: ${ATLASVPN_CORS_ORIGINS:-https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173}
+      ATLASVPN_CORS_ORIGINS: ${ATLASVPN_CORS_ORIGINS:-https://atlas-ui.verkku.com,https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173}
     volumes:
       - atlas_settings:/app/.atlasvpn
       - atlas_cloudflared:/app/.cloudflared-tunnels

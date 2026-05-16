@@ -65,10 +65,10 @@ def _api_only() -> bool:
 def _cors_origins() -> list[str]:
     raw = os.environ.get(
         "ATLASVPN_CORS_ORIGINS",
-        "https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173",
+        "https://atlas-ui.verkku.com,https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173",
     )
     out = [x.strip() for x in raw.split(",") if x.strip()]
-    return out if out else ["https://atlas-vpn.verkku.com"]
+    return out if out else ["https://atlas-ui.verkku.com"]
 
 
 def _wait_tcp(host: str, port: int, timeout: float = 20.0) -> None:
