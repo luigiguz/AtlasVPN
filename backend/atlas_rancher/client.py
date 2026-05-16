@@ -13,6 +13,7 @@ STEVE_CUSTOM_CLUSTER_PATHS = (
     "v1/provisioning.cattle.io.customcluster",
 )
 STEVE_PROVISIONING_CLUSTERS = "v1/provisioning.cattle.io.clusters"
+RANCHER_HTTP_TIMEOUT_S = 12.0
 
 
 class RancherConfigError(Exception):
@@ -34,7 +35,18 @@ def _ssl_context(insecure: bool) -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
-def rancher_get(url: str, token: str, path: str, *, insecure_tls: bool = False) -> Any:
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def rancher_get(
+    url: str,
+    token: str,
+    path: str,
+    *,
+    insecure_tls: bool = False,
+    timeout_s: float = RANCHER_HTTP_TIMEOUT_S,
+) -> Any:
     if not url or not token:
         raise RancherConfigError("Configura la URL y el token de Rancher (Atlas Rancher o variables ATLAS_RANCHER_*).")
     full = f"{url.rstrip('/')}/{path.lstrip('/')}"
@@ -47,7 +59,7 @@ def rancher_get(url: str, token: str, path: str, *, insecure_tls: bool = False) 
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=45, context=_ssl_context(insecure_tls)) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_s, context=_ssl_context(insecure_tls)) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as e:
         body = ""
@@ -141,26 +153,40 @@ def _condition_state(item: dict[str, Any]) -> str:
 
 
 def _normalize_cluster(item: dict[str, Any]) -> dict[str, Any]:
-    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    spec = item.get("spec") if isinstance(item.get("spec"), dict) else {}
+    meta = _as_dict(item.get("metadata"))
+    spec = _as_dict(item.get("spec"))
+    status = _as_dict(item.get("status"))
+    annotations = _as_dict(meta.get("annotations"))
+    labels = _as_dict(meta.get("labels"))
     name = str(meta.get("name") or item.get("name") or item.get("id") or "")
     namespace = str(meta.get("namespace") or item.get("namespaceId") or "fleet-default")
     k8s = str(spec.get("kubernetesVersion") or "")
+    display = (
+        annotations.get("provisioning.cattle.io/management-cluster-display-name")
+        or labels.get("app.kubernetes.io/name")
+        or name
+    )
+    ready: bool | None = None
+    if "ready" in status:
+        ready = bool(status.get("ready"))
     return {
         "id": str(item.get("id") or f"{namespace}/{name}"),
         "name": name,
         "namespace": namespace,
-        "displayName": str(
-            (meta.get("annotations") or {}).get("provisioning.cattle.io/management-cluster-display-name")
-            or (meta.get("labels") or {}).get("app.kubernetes.io/name")
-            or name
-        ),
+        "displayName": str(display),
         "state": _condition_state(item),
         "kubernetesVersion": k8s,
-        "ready": bool((item.get("status") or {}).get("ready")) if isinstance(item.get("status"), dict) else None,
+        "ready": ready,
         "kind": _resource_kind(item),
         "createdAt": meta.get("creationTimestamp"),
     }
+
+
+def _is_connection_error(err: RancherApiError) -> bool:
+    if err.status is not None:
+        return False
+    msg = str(err).lower()
+    return "conectar" in msg or "timed out" in msg or "timeout" in msg
 
 
 def list_custom_clusters(settings: dict[str, str]) -> tuple[str, list[dict[str, Any]]]:
@@ -174,13 +200,23 @@ def list_custom_clusters(settings: dict[str, str]) -> tuple[str, list[dict[str, 
         except RancherApiError as e:
             if e.status == 404:
                 continue
+            if _is_connection_error(e):
+                raise
             raise
         items = _collect_items(payload)
         if items is not None:
             normalized = [_normalize_cluster(i) for i in items if _is_custom_cluster_resource(i)]
             return path, normalized
 
-    payload = rancher_get(url, token, STEVE_PROVISIONING_CLUSTERS, insecure_tls=insecure)
+    try:
+        payload = rancher_get(url, token, STEVE_PROVISIONING_CLUSTERS, insecure_tls=insecure)
+    except RancherApiError as e:
+        if _is_connection_error(e):
+            raise RancherApiError(
+                f"No se pudo alcanzar Rancher en {url}. "
+                "Comprueba URL, token, TLS (insecure) y que el servidor Atlas pueda salir a esa red."
+            ) from e
+        raise
     items = _collect_items(payload) or []
     filtered = [i for i in items if _is_provisioning_custom_cluster(i)]
     return f"{STEVE_PROVISIONING_CLUSTERS}?filter=custom", [_normalize_cluster(i) for i in filtered]

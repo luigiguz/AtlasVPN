@@ -17,8 +17,11 @@ def load_rancher_settings() -> dict[str, str]:
         "insecure_tls": False,
     }
     if RANCHER_SETTINGS_FILE.is_file():
-        with RANCHER_SETTINGS_FILE.open(encoding="utf-8") as f:
-            data = json.load(f)
+        try:
+            with RANCHER_SETTINGS_FILE.open(encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            data = {}
         file_cfg["url"] = str(data.get("url", "")).strip().rstrip("/")
         file_cfg["token"] = str(data.get("token", "")).strip()
         file_cfg["insecure_tls"] = bool(data.get("insecure_tls", False))

@@ -18,6 +18,8 @@ export type RancherCustomCluster = {
 
 type ClustersResponse = {
   ok: boolean;
+  configured?: boolean;
+  message?: string;
   source: string;
   rancherUrl: string;
   count: number;
@@ -64,9 +66,19 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
       setClusters(data.clusters ?? []);
       setSource(data.source ?? "");
       setRancherUrl(data.rancherUrl ?? "");
+      if (data.configured === false && data.message) {
+        setError(data.message);
+      }
     } catch (e) {
       setClusters([]);
-      setError(e instanceof Error ? e.message : "No se pudieron cargar los clusters.");
+      const msg = e instanceof Error ? e.message : "No se pudieron cargar los clusters.";
+      if (/failed to fetch|networkerror/i.test(msg)) {
+        setError(
+          "No se pudo contactar el API (api-atlas-vpn.verkku.com). Suele ser 502 en el túnel o API sin desplegar la última versión. Comprueba que atlas-api esté en marcha y vuelve a desplegar."
+        );
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
