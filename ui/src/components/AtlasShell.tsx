@@ -503,9 +503,9 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
   );
 
   return (
-    <motion.div className="flex min-h-screen bg-[#0b0d10] text-zinc-100">
+    <motion.div className="flex h-dvh min-h-0 overflow-hidden bg-[#0b0d10] text-zinc-100">
       <motion.aside
-        className="hidden h-full shrink-0 overflow-hidden border-r border-white/[0.06] bg-[#0d0f12] md:flex md:flex-col"
+        className="hidden min-h-0 shrink-0 self-stretch overflow-hidden border-r border-white/[0.06] bg-[#0d0f12] md:flex md:flex-col"
         initial={false}
         animate={{ width: sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED }}
         transition={sidebarMotion}
