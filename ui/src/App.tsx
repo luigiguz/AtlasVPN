@@ -29,8 +29,9 @@ import {
 } from "react";
 
 import { API_BASE, api, apiUrl, bearerHeaders, setAccessToken } from "./apiClient";
-import type { AtlasRouteId } from "./atlasNav";
+import { isAtlasVpnRoute, type AtlasRouteId } from "./atlasNav";
 import { AtlasShell } from "./components/AtlasShell";
+import { PoweredByVerkkutech } from "./components/PoweredByVerkkutech";
 import {
   parseSshWebPopoutParams,
   SshWebPopoutApp,
@@ -289,6 +290,7 @@ function AuthLoginPanel({ onDone }: { onDone: (u: AuthUser) => void }) {
         >
           {busy ? "Entrando…" : "Entrar"}
         </button>
+        <PoweredByVerkkutech compact className="border-t border-cf-line/60 pt-4" />
       </form>
     </div>
   );
@@ -1710,23 +1712,16 @@ export default function App() {
                 </p>
               </div>
               <div className="mt-8 border-t border-cf-line/70 pt-6">
-                <p className="text-center text-[10px] font-semibold uppercase tracking-[0.32em] text-zinc-500">
-                  Desarrollo
-                </p>
-                <p className="mt-3 text-center text-xl font-bold tracking-tight text-zinc-100 sm:text-2xl">
-                  <span className="bg-gradient-to-r from-amber-100 via-cf-orange to-amber-100 bg-clip-text text-transparent drop-shadow-[0_0_24px_rgba(249,115,22,0.25)]">
-                    Luis Guzman
-                  </span>
-                </p>
+                <PoweredByVerkkutech />
               </div>
             </motion.div>
           </motion.div>
         )}
       </AtlasShell>
 
-      {canAdmin ? (
+      {canAdmin && isAtlasVpnRoute(tab) ? (
       <>
-      {/* Sincronización Cloudflare: flotante arrastrable (solo administradores) */}
+      {/* Sincronización Cloudflare: solo en módulo Atlas VPN (Conexiones / Poslite / CF) */}
       <div
         className={`pointer-events-none fixed z-[70] flex max-w-[min(100vw-1.5rem,20rem)] flex-col gap-1.5 ${
           cfFabPos ? "items-start" : "items-end bottom-4 right-4 sm:bottom-5 sm:right-5"

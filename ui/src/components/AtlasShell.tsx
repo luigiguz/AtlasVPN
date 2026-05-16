@@ -19,6 +19,7 @@ import {
   type AtlasRouteId,
 } from "../atlasNav";
 import { apiUrl } from "../apiClient";
+import { PoweredByVerkkutech } from "./PoweredByVerkkutech";
 
 type AuthUser = { username: string; role: "admin" | "operator" | "viewer" };
 
@@ -181,6 +182,7 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
   const navEntries = useMemo(() => buildAtlasNav(canAdmin), [canAdmin]);
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() => ({
     "atlas-vpn": true,
+    "atlas-admin": true,
     "coming-soon": false,
   }));
 
@@ -245,13 +247,14 @@ export function AtlasShell({ route, onNavigate, user, canAdmin, onLogout, childr
           setGroupOpen={setGroupOpen}
         />
       </div>
-      <div className="shrink-0 border-t border-white/[0.06] p-2">
+      <div className="shrink-0 space-y-2 border-t border-white/[0.06] p-3">
+        <PoweredByVerkkutech compact className="py-1" />
         <button
           type="button"
           onClick={() => onNavigate("about")}
           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
         >
-          Administrar cuenta
+          Acerca de
         </button>
       </div>
     </div>

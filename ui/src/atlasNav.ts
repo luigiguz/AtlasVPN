@@ -1,8 +1,15 @@
 import type { LucideIcon } from "lucide-react";
-import { Cloud, Home, Info, Shield, Store, Users, Wifi } from "lucide-react";
+import { Cloud, Home, Info, Settings, Shield, Store, Users, Wifi } from "lucide-react";
 
 /** Rutas de la consola web Atlas (plataforma). */
 export type AtlasRouteId = "home" | "conn" | "poslite" | "cf" | "users" | "about";
+
+/** Rutas del módulo Atlas VPN (sync CF, túneles, Poslite). */
+export const ATLAS_VPN_ROUTE_IDS = ["conn", "poslite", "cf"] as const satisfies readonly AtlasRouteId[];
+
+export function isAtlasVpnRoute(route: AtlasRouteId): boolean {
+  return (ATLAS_VPN_ROUTE_IDS as readonly AtlasRouteId[]).includes(route);
+}
 
 export type AtlasNavLeaf = {
   kind: "leaf";
@@ -35,12 +42,11 @@ export function buildAtlasNav(canAdmin: boolean): AtlasNavEntry[] {
     ...(canAdmin
       ? ([
           { kind: "leaf", id: "vpn-cf", route: "cf", label: "Cloudflare", icon: Cloud, adminOnly: true },
-          { kind: "leaf", id: "vpn-users", route: "users", label: "Usuarios", icon: Users, adminOnly: true },
         ] satisfies AtlasNavLeaf[])
       : []),
   ];
 
-  return [
+  const entries: AtlasNavEntry[] = [
     { kind: "leaf", id: "home", route: "home", label: "Inicio", icon: Home },
     {
       kind: "group",
@@ -50,6 +56,22 @@ export function buildAtlasNav(canAdmin: boolean): AtlasNavEntry[] {
       defaultOpen: true,
       children: vpnChildren,
     },
+  ];
+
+  if (canAdmin) {
+    entries.push({
+      kind: "group",
+      id: "atlas-admin",
+      label: "Administración",
+      icon: Settings,
+      defaultOpen: true,
+      children: [
+        { kind: "leaf", id: "admin-users", route: "users", label: "Usuarios", icon: Users, adminOnly: true },
+      ],
+    });
+  }
+
+  entries.push(
     {
       kind: "group",
       id: "coming-soon",
@@ -68,7 +90,9 @@ export function buildAtlasNav(canAdmin: boolean): AtlasNavEntry[] {
       ],
     },
     { kind: "leaf", id: "about", route: "about", label: "Acerca de", icon: Info },
-  ];
+  );
+
+  return entries;
 }
 
 export function routeMeta(route: AtlasRouteId): { title: string; breadcrumb: string[] } {
@@ -82,7 +106,7 @@ export function routeMeta(route: AtlasRouteId): { title: string; breadcrumb: str
     case "cf":
       return { title: "Cloudflare", breadcrumb: ["Atlas", "Atlas VPN", "Cloudflare"] };
     case "users":
-      return { title: "Usuarios", breadcrumb: ["Atlas", "Atlas VPN", "Usuarios"] };
+      return { title: "Usuarios", breadcrumb: ["Atlas", "Administración", "Usuarios"] };
     case "about":
       return { title: "Acerca de", breadcrumb: ["Atlas", "Acerca de"] };
     default:
