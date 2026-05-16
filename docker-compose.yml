@@ -27,7 +27,7 @@ services:
       ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-0}
       ATLAS_SESSION_MAX_AGE: ${ATLAS_SESSION_MAX_AGE:-604800}
       ATLAS_DEFAULT_ADMIN_USERNAME: ${ATLAS_DEFAULT_ADMIN_USERNAME:-admin}
-      ATLAS_DEFAULT_ADMIN_PASSWORD: ${ATLAS_DEFAULT_ADMIN_PASSWORD:-}
+      ATLAS_DEFAULT_ADMIN_PASSWORD: ${ATLAS_DEFAULT_ADMIN_PASSWORD:-Atlas_Admin_Initial12}
       ATLAS_CORS_ORIGINS: ${ATLAS_CORS_ORIGINS:-https://atlas-ui.verkku.com,https://atlas-vpn.verkku.com,http://127.0.0.1:5173,http://localhost:5173}
     volumes:
       - atlas_settings:/app/.atlas
