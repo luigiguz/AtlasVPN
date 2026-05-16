@@ -40,6 +40,7 @@ import {
   type SshWebSession,
 } from "./WebSshSessionsDock";
 import { AtlasHomeView } from "./views/AtlasHomeView";
+import { AtlasRancherClustersView } from "./views/AtlasRancherClustersView";
 
 type SiteRow = {
   id: string;
@@ -1170,6 +1171,8 @@ export default function App() {
             onNavigate={setTab}
           />
         )}
+
+        {tab === "rancher-clusters" && <AtlasRancherClustersView canAdmin={canAdmin} />}
 
         {tab === "conn" && (
           <motion.div

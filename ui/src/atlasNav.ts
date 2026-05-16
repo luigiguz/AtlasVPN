@@ -1,8 +1,8 @@
 import type { LucideIcon } from "lucide-react";
-import { Cloud, Home, Info, Settings, Shield, Store, Users, Wifi } from "lucide-react";
+import { Cloud, Home, Info, Server, Settings, Shield, Store, Users, Wifi } from "lucide-react";
 
 /** Rutas de la consola web Atlas (plataforma). */
-export type AtlasRouteId = "home" | "conn" | "poslite" | "cf" | "users" | "about";
+export type AtlasRouteId = "home" | "conn" | "poslite" | "cf" | "rancher-clusters" | "users" | "about";
 
 /** Rutas del módulo Atlas VPN (sync CF, túneles, Poslite). */
 export const ATLAS_VPN_ROUTE_IDS = ["conn", "poslite", "cf"] as const satisfies readonly AtlasRouteId[];
@@ -56,6 +56,22 @@ export function buildAtlasNav(canAdmin: boolean): AtlasNavEntry[] {
       defaultOpen: true,
       children: vpnChildren,
     },
+    {
+      kind: "group",
+      id: "atlas-rancher",
+      label: "Atlas Rancher",
+      icon: Server,
+      defaultOpen: true,
+      children: [
+        {
+          kind: "leaf",
+          id: "rancher-clusters",
+          route: "rancher-clusters",
+          label: "Custom clusters",
+          icon: Server,
+        },
+      ],
+    },
   ];
 
   if (canAdmin) {
@@ -71,26 +87,7 @@ export function buildAtlasNav(canAdmin: boolean): AtlasNavEntry[] {
     });
   }
 
-  entries.push(
-    {
-      kind: "group",
-      id: "coming-soon",
-      label: "Próximamente",
-      icon: Info,
-      defaultOpen: false,
-      children: [
-        {
-          kind: "leaf",
-          id: "future-rancher",
-          route: "home",
-          label: "Atlas Rancher",
-          icon: Store,
-          comingSoon: true,
-        },
-      ],
-    },
-    { kind: "leaf", id: "about", route: "about", label: "Acerca de", icon: Info },
-  );
+  entries.push({ kind: "leaf", id: "about", route: "about", label: "Acerca de", icon: Info });
 
   return entries;
 }
@@ -105,6 +102,8 @@ export function routeMeta(route: AtlasRouteId): { title: string; breadcrumb: str
       return { title: "Poslite", breadcrumb: ["Atlas", "Atlas VPN", "Poslite"] };
     case "cf":
       return { title: "Cloudflare", breadcrumb: ["Atlas", "Atlas VPN", "Cloudflare"] };
+    case "rancher-clusters":
+      return { title: "Custom clusters", breadcrumb: ["Atlas", "Atlas Rancher", "Custom clusters"] };
     case "users":
       return { title: "Usuarios", breadcrumb: ["Atlas", "Administración", "Usuarios"] };
     case "about":

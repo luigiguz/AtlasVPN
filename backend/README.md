@@ -23,7 +23,7 @@ ui/
 |---------|-----------------|
 | **atlas_core** | Sesiones, usuarios SQLite, JWT, `paths` (`.atlas/`, `ui/public/branding/`, `scripts/tunnels.json`) |
 | **atlas_vpn** | Sync Cloudflare, settings, SSH WebSocket, Poslite, pgAdmin, CustomTkinter |
-| **atlas_rancher** | Router `/api/atlas-rancher/*` (stub hasta implementar el módulo) |
+| **atlas_rancher** | Rancher API: listado de Custom clusters (`/api/atlas-rancher/custom-clusters`) |
 | **atlas_api** | `create_app()`, `run_web_server()`, `run_web_desktop()`, `__main__` |
 
 ## Cómo se ejecuta
@@ -39,12 +39,11 @@ python -m atlas_api --tk         # GUI legacy CustomTkinter
 
 En Docker el `WORKDIR` es `/app`; se copia `backend/` y el comando es `python -m atlas_api`.
 
-## Añadir Atlas Rancher (siguiente fase)
+## Atlas Rancher
 
-1. Implementar lógica en `backend/atlas_rancher/`.
-2. Ampliar `backend/atlas_rancher/router.py`.
-3. En UI: quitar `comingSoon` en `ui/src/atlasNav.ts` y crear vista.
-4. Prefijo API: `/api/atlas-rancher/...` (ya reservado en el stub).
+- Config: `.atlas/rancher.json` o variables `ATLAS_RANCHER_URL`, `ATLAS_RANCHER_TOKEN`, `ATLAS_RANCHER_INSECURE_TLS`.
+- Admin: `POST /api/atlas-rancher/settings` (URL + token Bearer).
+- Listado: `GET /api/atlas-rancher/custom-clusters` (recurso Steve `customclusters` o clusters provisioning sin machine pools).
 
 ## Añadir otro módulo
 
