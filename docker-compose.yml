@@ -1,5 +1,5 @@
 # Plataforma Atlas (API + UI nginx). Túneles Cloudflare típicos:
-#   https://atlas-ui.verkku.com      → localhost:8080 (UI)
+#   https://atlas-ui.verkku.com      → localhost:8088 (UI; puerto host ATLAS_UI_PORT)
 #   https://api-atlas-vpn.verkku.com → localhost:8765 (API)
 #
 # UI: ATLAS_PUBLIC_API_URL en atlas-ui (escribe /atlas-runtime-config.js).
@@ -50,7 +50,7 @@ services:
     container_name: atlas-ui
     restart: unless-stopped
     ports:
-      - "${ATLAS_UI_PORT:-8080}:80"
+      - "${ATLAS_UI_PORT:-8088}:80"
     depends_on:
       atlas-api:
         condition: service_started
