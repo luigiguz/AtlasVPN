@@ -9,6 +9,7 @@ import urllib.request
 from typing import Any
 
 from atlas_core.env import atlas_env
+from atlas_rancher.labels import normalize_application, normalize_distro
 
 STEVE_CUSTOM_CLUSTER_PATHS = (
     "v1/provisioning.cattle.io.customclusters",
@@ -229,8 +230,8 @@ def _normalize_cluster(item: dict[str, Any]) -> dict[str, Any]:
         "kind": _resource_kind(item),
         "createdAt": meta.get("creationTimestamp"),
         "labels": {str(k): str(v) for k, v in labels.items() if v is not None},
-        "application": _label("application"),
-        "distro": _label("distro"),
+        "application": normalize_application(_label("application")),
+        "distro": normalize_distro(_label("distro")),
         "store": _label("store"),
         "atlas": _label("atlas"),
     }

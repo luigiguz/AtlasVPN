@@ -3,6 +3,14 @@ import { Loader2, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { api } from "../apiClient";
+import {
+  isPosliteApplication,
+  isValidPosliteDistro,
+  normalizeApplication,
+  normalizeDistro,
+  POSLITE_APPLICATION,
+  POSLITE_DISTROS,
+} from "../rancherLabels";
 
 export type RancherCustomCluster = {
   id: string;
@@ -43,7 +51,7 @@ type Props = {
 };
 
 const FILTER_ALL = "";
-const DEFAULT_APPLICATION = "poslite";
+const DEFAULT_APPLICATION = POSLITE_APPLICATION;
 
 function stateTone(state: string): string {
   const s = state.toLowerCase();
@@ -64,10 +72,14 @@ function clusterMatchesFilters(
   application: string,
   distro: string
 ): boolean {
-  if (application && (c.application || "").toLowerCase() !== application.toLowerCase()) {
+  if (application && normalizeApplication(c.application) !== normalizeApplication(application)) {
     return false;
   }
-  if (distro && (c.distro || "").toLowerCase() !== distro.toLowerCase()) {
+  const appNorm = normalizeApplication(application || c.application);
+  if (isPosliteApplication(appNorm) && !isValidPosliteDistro(c.distro)) {
+    return false;
+  }
+  if (distro && normalizeDistro(c.distro) !== normalizeDistro(distro)) {
     return false;
   }
   return true;
@@ -90,8 +102,24 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
   const [cfgSaving, setCfgSaving] = useState(false);
   const [cfgMsg, setCfgMsg] = useState("");
 
-  const applicationOptions = useMemo(() => uniqueSorted(clusters.map((c) => c.application)), [clusters]);
-  const distroOptions = useMemo(() => uniqueSorted(clusters.map((c) => c.distro)), [clusters]);
+  const applicationOptions = useMemo(
+    () => uniqueSorted(clusters.map((c) => normalizeApplication(c.application))),
+    [clusters]
+  );
+  const distroOptions = useMemo(() => {
+    if (isPosliteApplication(filterApplication)) {
+      return [...POSLITE_DISTROS];
+    }
+    return uniqueSorted(clusters.map((c) => normalizeDistro(c.distro)));
+  }, [clusters, filterApplication]);
+
+  useEffect(() => {
+    if (!isPosliteApplication(filterApplication)) return;
+    if (!filterDistro) return;
+    if (!isValidPosliteDistro(filterDistro)) {
+      setFilterDistro(FILTER_ALL);
+    }
+  }, [filterApplication, filterDistro]);
 
   const filteredClusters = useMemo(
     () => clusters.filter((c) => clusterMatchesFilters(c, filterApplication, filterDistro)),
@@ -105,8 +133,8 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
       const data = await api<ClustersResponse>("/api/atlas-rancher/custom-clusters");
       const list = (data.clusters ?? []).map((c) => ({
         ...c,
-        application: c.application ?? c.labels?.application ?? "",
-        distro: c.distro ?? c.labels?.distro ?? "",
+        application: normalizeApplication(c.application ?? c.labels?.application ?? ""),
+        distro: normalizeDistro(c.distro ?? c.labels?.distro ?? ""),
         store: c.store ?? c.labels?.store ?? "",
         atlas: c.atlas ?? c.labels?.atlas ?? "",
       }));
@@ -232,7 +260,12 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
             Aplicación
             <select
               value={filterApplication}
-              onChange={(e) => setFilterApplication(e.target.value)}
+              onChange={(e) => {
+                setFilterApplication(e.target.value);
+                if (isPosliteApplication(e.target.value)) {
+                  setFilterDistro((d) => (d && isValidPosliteDistro(d) ? d : FILTER_ALL));
+                }
+              }}
               className="mt-1 w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm text-zinc-100"
             >
               <option value={FILTER_ALL}>Todas</option>
