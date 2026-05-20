@@ -51,7 +51,6 @@ type Props = {
 };
 
 const FILTER_ALL = "";
-const DEFAULT_APPLICATION = POSLITE_APPLICATION;
 
 function stateTone(state: string): string {
   const s = state.toLowerCase();
@@ -91,7 +90,7 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
   const [rancherUrl, setRancherUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [filterApplication, setFilterApplication] = useState(DEFAULT_APPLICATION);
+  const [filterApplication, setFilterApplication] = useState(FILTER_ALL);
   const [filterDistro, setFilterDistro] = useState(FILTER_ALL);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cfgUrl, setCfgUrl] = useState("");
