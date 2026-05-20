@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Loader2, RefreshCw, Server } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { api } from "../apiClient";
 
@@ -14,6 +14,11 @@ export type RancherCustomCluster = {
   ready: boolean | null;
   kind: string;
   createdAt?: string | null;
+  labels?: Record<string, string>;
+  application: string;
+  distro: string;
+  store: string;
+  atlas: string;
 };
 
 type ClustersResponse = {
@@ -37,6 +42,9 @@ type Props = {
   canAdmin: boolean;
 };
 
+const FILTER_ALL = "";
+const DEFAULT_APPLICATION = "poslite";
+
 function stateTone(state: string): string {
   const s = state.toLowerCase();
   if (s.includes("ready") || s === "active") return "text-emerald-400";
@@ -45,12 +53,34 @@ function stateTone(state: string): string {
   return "text-zinc-400";
 }
 
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values.map((v) => v.trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, "es")
+  );
+}
+
+function clusterMatchesFilters(
+  c: RancherCustomCluster,
+  application: string,
+  distro: string
+): boolean {
+  if (application && (c.application || "").toLowerCase() !== application.toLowerCase()) {
+    return false;
+  }
+  if (distro && (c.distro || "").toLowerCase() !== distro.toLowerCase()) {
+    return false;
+  }
+  return true;
+}
+
 export function AtlasRancherClustersView({ canAdmin }: Props) {
   const [clusters, setClusters] = useState<RancherCustomCluster[]>([]);
   const [source, setSource] = useState("");
   const [rancherUrl, setRancherUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [filterApplication, setFilterApplication] = useState(DEFAULT_APPLICATION);
+  const [filterDistro, setFilterDistro] = useState(FILTER_ALL);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cfgUrl, setCfgUrl] = useState("");
   const [cfgToken, setCfgToken] = useState("");
@@ -60,12 +90,27 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
   const [cfgSaving, setCfgSaving] = useState(false);
   const [cfgMsg, setCfgMsg] = useState("");
 
+  const applicationOptions = useMemo(() => uniqueSorted(clusters.map((c) => c.application)), [clusters]);
+  const distroOptions = useMemo(() => uniqueSorted(clusters.map((c) => c.distro)), [clusters]);
+
+  const filteredClusters = useMemo(
+    () => clusters.filter((c) => clusterMatchesFilters(c, filterApplication, filterDistro)),
+    [clusters, filterApplication, filterDistro]
+  );
+
   const loadClusters = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const data = await api<ClustersResponse>("/api/atlas-rancher/custom-clusters");
-      setClusters(data.clusters ?? []);
+      const list = (data.clusters ?? []).map((c) => ({
+        ...c,
+        application: c.application ?? c.labels?.application ?? "",
+        distro: c.distro ?? c.labels?.distro ?? "",
+        store: c.store ?? c.labels?.store ?? "",
+        atlas: c.atlas ?? c.labels?.atlas ?? "",
+      }));
+      setClusters(list);
       setSource(data.source ?? "");
       setRancherUrl(data.rancherUrl ?? "");
       if (data.configured === false && data.message) {
@@ -149,7 +194,7 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
           <motion.div layout>
             <h1 className="text-lg font-semibold text-zinc-100">Custom clusters</h1>
             <p className="text-xs text-zinc-500">
-              Solo clusters personalizados (registro de nodos propios) desde Rancher.
+              Clusters con labels Rancher (application, distro, store).
               {rancherUrl ? (
                 <>
                   {" "}
@@ -180,6 +225,44 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
           </button>
         </div>
       </div>
+
+      {clusters.length > 0 ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-cf-line/70 bg-cf-panel/50 p-3 sm:flex-row sm:items-end sm:gap-4">
+          <label className="block min-w-[10rem] flex-1 text-xs text-zinc-400">
+            Aplicación
+            <select
+              value={filterApplication}
+              onChange={(e) => setFilterApplication(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm text-zinc-100"
+            >
+              <option value={FILTER_ALL}>Todas</option>
+              {applicationOptions.map((app) => (
+                <option key={app} value={app}>
+                  {app}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block min-w-[10rem] flex-1 text-xs text-zinc-400">
+            Distribución (distro)
+            <select
+              value={filterDistro}
+              onChange={(e) => setFilterDistro(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-cf-line bg-black/30 px-3 py-2 text-sm text-zinc-100"
+            >
+              <option value={FILTER_ALL}>Todas</option>
+              {distroOptions.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="shrink-0 pb-2 text-xs tabular-nums text-zinc-500">
+            {filteredClusters.length} de {clusters.length} cluster{clusters.length !== 1 ? "s" : ""}
+          </p>
+        </div>
+      ) : null}
 
       {canAdmin && settingsOpen ? (
         <form
@@ -222,7 +305,7 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
           <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
             Cloudflare (si Rancher está detrás de CF Access)
           </p>
-          <motion.div layout className="mt-2 grid gap-3 sm:grid-cols-2">
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
             <label className="block text-xs text-zinc-400">
               CF-Access-Client-Id
               <input
@@ -243,7 +326,7 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
                 autoComplete="off"
               />
             </label>
-          </motion.div>
+          </div>
           {cfgMsg ? <p className="mt-2 text-xs text-zinc-400">{cfgMsg}</p> : null}
           <button
             type="submit"
@@ -273,20 +356,25 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
             No hay Custom clusters visibles.
             {canAdmin ? " Configura la conexión a Rancher y pulsa Actualizar." : null}
           </motion.div>
+        ) : filteredClusters.length === 0 ? (
+          <motion.div layout className="p-10 text-center text-sm text-zinc-500">
+            Ningún cluster coincide con los filtros seleccionados.
+          </motion.div>
         ) : (
-          <motion.div layout className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b border-cf-line/60 text-xs uppercase tracking-wide text-zinc-500">
                   <th className="px-4 py-3 font-medium">Nombre</th>
-                  <th className="px-4 py-3 font-medium">Namespace</th>
+                  <th className="px-4 py-3 font-medium">Tienda</th>
+                  <th className="px-4 py-3 font-medium">Distro</th>
+                  <th className="px-4 py-3 font-medium">Aplicación</th>
                   <th className="px-4 py-3 font-medium">Estado</th>
                   <th className="px-4 py-3 font-medium">Kubernetes</th>
-                  <th className="px-4 py-3 font-medium">Tipo</th>
                 </tr>
               </thead>
               <tbody>
-                {clusters.map((c) => (
+                {filteredClusters.map((c) => (
                   <tr
                     key={c.id}
                     className="border-b border-cf-line/40 last:border-0 hover:bg-white/[0.02]"
@@ -297,19 +385,24 @@ export function AtlasRancherClustersView({ canAdmin }: Props) {
                         <span className="mt-0.5 block text-xs text-zinc-600">{c.name}</span>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 text-zinc-400">{c.namespace}</td>
+                    <td className="px-4 py-3 text-zinc-400">{c.store || "—"}</td>
+                    <td className="px-4 py-3 text-zinc-400">{c.distro || "—"}</td>
+                    <td className="px-4 py-3 text-zinc-400">{c.application || "—"}</td>
                     <td className={`px-4 py-3 capitalize ${stateTone(c.state)}`}>{c.state}</td>
                     <td className="px-4 py-3 text-zinc-400">{c.kubernetesVersion || "—"}</td>
-                    <td className="px-4 py-3 text-xs text-zinc-500">{c.kind || "CustomCluster"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </motion.div>
+          </div>
         )}
         {source && !loading ? (
           <p className="border-t border-cf-line/40 px-4 py-2 text-[11px] text-zinc-600">
-            Fuente API: {source} · {clusters.length} cluster{clusters.length !== 1 ? "s" : ""}
+            Fuente API: {source} · {filteredClusters.length} de {clusters.length} cluster
+            {clusters.length !== 1 ? "s" : ""}
+            {filterApplication || filterDistro
+              ? ` · filtros: application=${filterApplication || "*"}, distro=${filterDistro || "*"}`
+              : ""}
           </p>
         ) : null}
       </motion.div>

@@ -200,6 +200,8 @@ def _normalize_cluster(item: dict[str, Any]) -> dict[str, Any]:
     status = _as_dict(item.get("status"))
     annotations = _as_dict(meta.get("annotations"))
     labels = _as_dict(meta.get("labels"))
+    if not labels:
+        labels = _as_dict(item.get("labels"))
     name = str(meta.get("name") or item.get("name") or item.get("id") or "")
     namespace = str(meta.get("namespace") or item.get("namespaceId") or "fleet-default")
     k8s = str(spec.get("kubernetesVersion") or "")
@@ -211,6 +213,11 @@ def _normalize_cluster(item: dict[str, Any]) -> dict[str, Any]:
     ready: bool | None = None
     if "ready" in status:
         ready = bool(status.get("ready"))
+
+    def _label(key: str) -> str:
+        v = labels.get(key)
+        return str(v).strip() if v is not None else ""
+
     return {
         "id": str(item.get("id") or f"{namespace}/{name}"),
         "name": name,
@@ -221,6 +228,11 @@ def _normalize_cluster(item: dict[str, Any]) -> dict[str, Any]:
         "ready": ready,
         "kind": _resource_kind(item),
         "createdAt": meta.get("creationTimestamp"),
+        "labels": {str(k): str(v) for k, v in labels.items() if v is not None},
+        "application": _label("application"),
+        "distro": _label("distro"),
+        "store": _label("store"),
+        "atlas": _label("atlas"),
     }
 
 
